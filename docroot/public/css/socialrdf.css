@@ -1,0 +1,59 @@
+/* topbar */
+#graph-selector {
+    margin-bottom: 70px
+}
+
+#graph-selector .container {
+    margin-left: 2%;
+    margin-right: 0px;
+    width: 95%
+}
+
+#graph-selector h4 {
+    float: left;
+    color: white
+}
+
+/* microblog posts container */
+
+#main-content .MicroblogPost  .avatar img {
+    max-width: 48px;
+    max-height: 48px;
+    height: 48px;
+    width: 48px
+}
+
+#main-content .MicroblogPost  .header {
+    padding: 5px;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    border-bottom-color: lightgray;
+    border-bottom-style: solid;
+    border-bottom-width: 1px
+}
+
+#main-content .MicroblogPost  .date {
+    float: right;
+    color: gray
+}
+
+#main-content .MicroblogPost  .action-links {
+    padding: 10px;
+    text-align: right;
+    margin-right: 10px
+}
+
+#main-content .MicroblogPost  .name {
+    font-weight: bold
+}
+
+/* Tools */
+#tools-list {
+    float: right
+}
+
+/* Twitter extension */
+
+.tweet-ref {
+    font-weight: bold
+}

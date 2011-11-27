@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:nodeID="_1">
+    <ns0:avatar xmlns:ns0="http://rdfs.org/sioc/ns#" rdf:resource="http://a0.twimg.com/profile_images/29129462/MiFoto3_normal.jpg"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="_1">
+    <ns0:name xmlns:ns0="http://rdfs.org/sioc/ns#">antoniogarrote</ns0:name>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="_1">
+    <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/OnlineAccount"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Person"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/PersonalProfileDocument"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="_1">
+    <ns0:accountServiceHomepage xmlns:ns0="http://xmlns.com/foaf/0.1/">http://twitter.com</ns0:accountServiceHomepage>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:firstName xmlns:ns0="http://xmlns.com/foaf/0.1/">Antonio</ns0:firstName>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:holdsAccount xmlns:ns0="http://xmlns.com/foaf/0.1/" rdf:nodeID="_1"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:lastName xmlns:ns0="http://xmlns.com/foaf/0.1/">Garrote</ns0:lastName>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:maker xmlns:ns0="http://xmlns.com/foaf/0.1/" rdf:resource="http://localhost:8080/social#me"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:mbox xmlns:ns0="http://xmlns.com/foaf/0.1/">antoniogarrote@gmail.com</ns0:mbox>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://localhost:8080/social#me">
+    <ns0:primaryTopic xmlns:ns0="http://xmlns.com/foaf/0.1/" rdf:resource="http://localhost:8080/social#me"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://social.rdf/certs/132180478992410001">
+    <ns0:identity xmlns:ns0="http://www.w3.org/ns/auth/cert#" rdf:resource="http://localhost:8080/social#me"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://social.rdf/certs/132180478992410001">
+    <ns0:modulus xmlns:ns0="http://www.w3.org/ns/auth/rsa#" rdf:datatype="http://www.w3.org/ns/auth/cert#hex">e41cf901b1a69248aa7817734e46d00adc68750f2097fc78098c1648154d876a3a82a98445d9b931e260685347db35cef33a3d919efb6c68bd84c91cc61f5c02f7bd662e4e772058c76853fff84c4cd3bc0e15dfab44f02c5143ec21f247cba8653dfed9b7e6ddd53119f3314990a711dbee14888fe71b03a57a1001665a69ba61a9d022eca8ceccbfc51f3962d4d758e36ba3bff81bcad600599691676fe6fb3422d8c5dead4718531318268488fdb5a345569613f915a0ab988f04b8df7663c165e1bbe1c0be4be8a45860acd61d38e0ade5c5f101e89693ab923f7eea1dc9ce6a425608f11f647d7fdde99fb0bceed38edf2274d062a616af37af566f24f9</ns0:modulus>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://social.rdf/certs/132180478992410001">
+    <ns0:public_exponent xmlns:ns0="http://www.w3.org/ns/auth/rsa#" rdf:datatype="http://www.w3.org/ns/auth/cert#hex">10001</ns0:public_exponent>
+  </rdf:Description>
+</rdf:RDF>

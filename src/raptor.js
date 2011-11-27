@@ -5,7 +5,7 @@ var raptorTarget = require(__dirname + '/raptor.node');
 function inherits(target, source) {
     for (var k in source.prototype)
         target[k] = source.prototype[k];
-}
+};
 
 
 exports.newParser = function(mimeType, cb) {
@@ -19,10 +19,11 @@ exports.newParser = function(mimeType, cb) {
             cb(parser);
         });
     }
-}
+};
 
 
 exports.newSerializer = function(mimeType) {
+    mimeType = this.mediaType(mimeType);
     var serializer = null;
 
     if(mimeType == null) {
@@ -34,4 +35,13 @@ exports.newSerializer = function(mimeType) {
     inherits(serializer, events.EventEmitter)
 
     return serializer
-}
+};
+
+exports.mediaType = function(typeExpr) {
+    if(typeExpr === 'application/rdf+xml' || typeExpr === 'text/html') {
+        return 'rdfxml';
+    } else if(typeExpr === 'text/turtle' || typeExpr === 'application/turtle' ||
+              typeExpr === 'text/n3' || typeExpr === 'application/n3' || typeExpr === 'text/plain') {
+        return 'turtle';
+    }
+};
