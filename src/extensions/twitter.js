@@ -211,7 +211,7 @@ Extension.prototype.execute = function(account, bindings, dbClient){
                                                 dbClient.collection('stream', function(coll) {
                                                     //console.log("*** inserted tweet :"+lastId);
                                                     //console.log(microblogpost);
-                                                    coll.insert(microblogpost, function(err, res){
+                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost,{'upsert':true} function(err, res){
                                                         k(floop, env);
                                                     });
                                                 });
@@ -299,7 +299,7 @@ Extension.prototype.import = function(account, bindings, dbClient){
                                                 dbClient.collection('stream', function(coll) {
                                                     //console.log("*** inserted tweet :"+lastId);
                                                     //console.log(microblogpost);
-                                                    coll.insert(microblogpost, function(err, res){
+                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost, {'upsert':true}function(err, res){
                                                         k(floop, env);
                                                     });
                                                 });

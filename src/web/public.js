@@ -53,6 +53,7 @@ Services.prototype.route = function(request, response, data) {
     if(handler != null) {
         this[handler](request.url.split(configuration.public.baseUrl)[1], request, components, response, data);
     } else {
+        var orig = request.url;
         var parts = request.url.split(configuration.public.baseUrl);
         if(parts.length > 2) {
             parts.shift();
@@ -62,6 +63,9 @@ Services.prototype.route = function(request, response, data) {
         }
 
         if(request.url != null) {
+            serveFile(request, response);
+        } if(request.url.indexOf('semantic_ko')!=-1) {
+            request.url = orig;
             serveFile(request, response);
         } else {
             response.withCORSHeader(404, {"Content-Type":"text/plain"});
