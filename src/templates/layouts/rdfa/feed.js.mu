@@ -6,9 +6,11 @@
   <head>
     <title>{{feedTitle}}</title>
     <link rel="alternate" type="application/atom+xml" href="{{current_graph}}.atom">
-    <link rel="stylesheet" href="/social/css/bootstrap.css">
+    <link rel="stylesheet" href="/social/css/bootstrap.min.css">
     <link rel="stylesheet" href="/social/css/socialrdf.css">
     <link rel="stylesheet" href="/social/css/rdfstore_frontend.css">
+    <script type='text/javascript' src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script type='text/javascript' src='http://ajax.microsoft.com/ajax/jquery.templates/beta1/jquery.tmpl.min.js'></script>
     <script type='text/javascript' src="/social/js/jquery.min.js"></script>
     <script type='text/javascript' src='/social/js/jquery.tmpl.js'></script>
     <script type='text/javascript' src="/social/js/bootstrap-dropdown.js"></script>

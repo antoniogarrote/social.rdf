@@ -20,7 +20,7 @@ var Services = function(options){
     this.extensions = options.extensions;    
 };
 
-
+var serveFile = utils.serveFile(configuration.public.docroot);
 /**
  * Routing logic
  */
@@ -62,7 +62,7 @@ Services.prototype.route = function(request, response, data) {
         }
 
         if(request.url != null) {
-            utils.serveFile(configuration.public.docroot, request, response);
+            serveFile(request, response);
         } else {
             response.withCORSHeader(404, {"Content-Type":"text/plain"});
             response.end();
@@ -133,7 +133,7 @@ Services.prototype.streamHandler = function(path, request, components, response,
                 views.render('feed', mediaTypeTmpl, nodes, {'feedTitle':'Public Global Graph',
                                                             'current_graph':configuration.public.baseUrl+'/stream',
                                                             'updated': updated,             
-                                                            'graphs': core.bindings.graphURIs('/stream'),
+                                                            'graphs': core.bindings.graphURIs(null),
                                                             'page':page,
                                                             'prev-link':configuration.public.baseUrl+'/stream?page='+(page-1<1 ? 1 : (page-1)),
                                                             'next-link':configuration.public.baseUrl+'/stream?page='+(page+1)}, request, function(err, rendered) {
@@ -203,7 +203,7 @@ Services.prototype.graphStreamHandler = function(path, request, components, resp
                                  {'feedTitle':'Public Graph: '+components[1],
                                   'current_graph':'/social'+graphId,
                                   'updated': updated,
-                                  'graphs': core.bindings.graphURIs(graphId),
+                                  'graphs': core.bindings.graphURIs(null),
                                   'page':page,
                                   'prev-link':'/social'+graphId+'?page='+(page-1<1 ? 1 : (page-1)),
                                   'next-link':'/social'+graphId+'?page='+(page+1)}, 
@@ -259,7 +259,7 @@ Services.prototype.singleStreamPostHandler = function(path, request, components,
                              {'feedTitle':'Public Graph: '+configuration.public.baseUrl+'/'+components[1]+'/'+components[2],
                               'current_graph':graphId,
                               'updated': updated,                 
-                              'graphs': core.bindings.graphURIs(graphId),
+                              'graphs': core.bindings.graphURIs(null),
                               'page':1,
                               'prev-link':graphId+"?page=1",
                               'next-link':graphId+"?page=1"},

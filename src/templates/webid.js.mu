@@ -7,7 +7,7 @@
       xmlns:rsa='http://www.w3.org/ns/auth/cert#'>
   <head>
     <title>{{feedTitle}}</title>
-    <link rel="stylesheet" href="/social/css/regularbootstrap.css">
+    <link rel="stylesheet" href="/social/css/regularbootstrap.min.css">
     <meta name="author" content="{{feed_author}}" />
   </head>
 

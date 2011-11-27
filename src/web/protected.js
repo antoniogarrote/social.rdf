@@ -13,6 +13,7 @@ var Services = function(options){
     this.extensions = options.extensions;    
 };
 
+var serveFile = utils.serveFile(configuration.admin.docroot);
 
 /**
  * Routing logic
@@ -40,7 +41,7 @@ Services.prototype.route = function(request, response, data, webID) {
         }
 
         if(request.url != null) {
-            utils.serveFile(configuration.admin.docroot, request, response);
+            serveFile(request, response);
         } else {
             response.writeHead(404, {"Content-Type":"text/plain"});
             response.end();
