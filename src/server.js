@@ -82,8 +82,10 @@ var startHttps = function() {
         try {
             res.withCORSHeader = utils.withCORSHeader
 
-            if(req.headers['user-agent'].indexOf('AppleWebKit') != -1 &&
-                req.headers['accept'].indexOf('text/html') != -1) {
+            if(req.headers['user-agent']&&
+               req.headers['user-agent'].indexOf('AppleWebKit') != -1 &&
+               req.headers['accept'] &&
+               req.headers['accept'].indexOf('text/html') != -1) {
                 req.headers['accept'] = 'text/html';
             }
 
@@ -142,8 +144,10 @@ var startHttp = function() {
 
     http.createServer(function (req, res) { 
         try {
-            if(req.headers['user-agent'].indexOf('AppleWebKit') != -1 &&
-                req.headers['accept'].indexOf('text/html') != -1) {
+            if(req.headers['user-agent'] &&
+               req.headers['user-agent'].indexOf('AppleWebKit') != -1 &&
+               req.headers['accept'] &&
+               req.headers['accept'].indexOf('text/html') != -1) {
                 req.headers['accept'] = 'text/html';
             }
        
