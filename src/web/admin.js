@@ -27,10 +27,6 @@ Services.prototype.route = function(request, response, data, webID) {
     var handler = null;
     var components = null;
 
-    console.log("checking base...");
-    console.log(configuration.admin.baseUrl);
-    console.log(request.url);
-
     if(request.url.indexOf(configuration.admin.baseUrl)!=0) {
         response.withCORSHeader(404, {"Content-Type":"text/plain"});
         response.end();

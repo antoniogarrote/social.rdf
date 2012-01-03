@@ -80,8 +80,6 @@ var startHttps = function() {
     console.log("trying to create server at "+configuration.admin.port);
     https.createServer(httpsOptions,function (req, res) { 
         try {
-	    console.log("HTTPS REQUEST");
-	    console.log(req.url);
             res.withCORSHeader = utils.withCORSHeader;
 
             if(req.headers['user-agent'] &&
