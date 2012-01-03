@@ -9,7 +9,7 @@ var routes = {'singleStreamPostHandler': /\/stream\/([^\/]+)\/([^\/]+)/,
               'graphStreamHandler': /\/stream\/([^\/]+)/,
               'streamHandler':/\/stream/};
 
-var webIDPath = configuration.webIDPath
+var webIDPath = configuration.webIDPath;
 if(webIDPath.indexOf("#") !== -1) {
     webIDPath = webIDPath.split("#")[0];
 }
@@ -53,7 +53,6 @@ Services.prototype.route = function(request, response, data) {
     if(handler != null) {
         this[handler](request.url.split(configuration.public.baseUrl)[1], request, components, response, data);
     } else {
-        var orig = request.url;
         var parts = request.url.split(configuration.public.baseUrl);
         if(parts.length > 2) {
             parts.shift();
@@ -63,9 +62,6 @@ Services.prototype.route = function(request, response, data) {
         }
 
         if(request.url != null) {
-            serveFile(request, response);
-        } if(request.url.indexOf('semantic_ko')!=-1) {
-            request.url = orig;
             serveFile(request, response);
         } else {
             response.withCORSHeader(404, {"Content-Type":"text/plain"});
@@ -325,7 +321,7 @@ Services.prototype.publicWebIDHandler = function(path, request, components, resp
 
                                 var formatted = that._prepareWebIDProfileForRDFa(profile);
                                 formatted['foaf:holdsAccount'] = formattedAccounts;
-                                formatted['certificate'] = certificate;
+                                formatted['cert:key'] = certificate;
                                 views.renderWebIDRDFa(formatted, {}, function(err, data) {
                                     if(err) {
                                         response.withCORSHeader(500, {"Content-Type":"text/plain"});
@@ -336,8 +332,10 @@ Services.prototype.publicWebIDHandler = function(path, request, components, resp
                                     }
                                 });
                             } else {
-                                core.jsonld.encode([utils.cleanMongoProperties(profile), 
-                                                    utils.cleanMongoProperties(certificate)], exportMediaType, function(err, data) {
+				// we add the certificate info
+				profile['http://www.w3.org/ns/auth/cert#key'] = certificate;
+
+                                core.jsonld.encode([utils.cleanMongoProperties(profile)], exportMediaType, function(err, data) {
                                                         if(err) {
                                                             response.withCORSHeader(500, {"Content-Type":"text/plain"});
                                                             response.end();
@@ -446,7 +444,7 @@ Services.prototype._addAccountsPublicProperties = function(webid,cb) {
 
                                           webid["foaf:holdsAccount"] = [];
                                           for(var p in accounts) {
-                                              webid["foaf:holdsAccount"].push(accounts[p])
+                                              webid["foaf:holdsAccount"].push(accounts[p]);
                                           }
                                           cb(false, webid);
                                       } else {

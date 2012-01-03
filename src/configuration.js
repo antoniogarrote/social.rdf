@@ -3,7 +3,7 @@
 //
 
 // Server domain
-exports.domain = "localhost"
+exports.domain = "localhost";
 
 // WebID (or redirection if WebID is in a remote server) URI path 
 // take into account HTTP-RANGE14

@@ -9,8 +9,9 @@ var configuration = require("./configuration");
 exports.VerificationAgent = function(certificate){
     this.subjectAltName = certificate.subjectaltname;
     this.modulus = certificate.modulus;
-    this.exponent = certificate.exponent;
-    this.uris = this.subjectAltName.split(",")
+    this.moduus = (''+this.modulus).replace(/^([0]{2})+/,"");
+    this.exponent = ''+parseInt(certificate.exponent,16);
+    this.uris = this.subjectAltName.split(",");
     for(var i=0; i<this.uris.length; i++) {
         this.uris[i] = this.uris[i].split("URI:")[1];
     }
@@ -25,16 +26,12 @@ exports.VerificationAgent.prototype._verify = function(uris, callback) {
         callback(true,"NotVerified");
     } else {
         var that = this;
-        var parsedUrl = url.parse(uris[0]);
-        var options = {host: parsedUrl.host,
+        var parsedUrl = url.parse(uris[0], true, true);
+        var options = {host: parsedUrl.hostname,
                        path: parsedUrl.pathname,
-                       port: parsedUrl.port,
+		       port: parsedUrl.port,
                        method: 'GET',
                        headers: {"Accept": "application/rdf+xml,application/xhtml+xml,text/html"}};
-
-        if(options.host.indexOf(":") != -1) {
-            options.host = options.host.split(":")[0];
-        }
 
         var req = http.request(options,function(response){
             if(response.statusCode==200) {
@@ -45,7 +42,7 @@ exports.VerificationAgent.prototype._verify = function(uris, callback) {
                 });
 
                 response.on('end', function(){
-                    var contentType = (response.headers['content-type'] || response.headers['Content-Type'])
+                    var contentType = (response.headers['content-type'] || response.headers['Content-Type']);
                     if(contentType) {
                         that._verifyWebId(uris[0], res, contentType, callback);
                     } else {
@@ -58,6 +55,8 @@ exports.VerificationAgent.prototype._verify = function(uris, callback) {
         });
 
         req.on('error', function(error) {
+	    console.log("*** ERROR!!!");
+	    console.log(error);
             uris.shift();
             that._verify(uris, callback);
         });
@@ -68,7 +67,35 @@ exports.VerificationAgent.prototype._verify = function(uris, callback) {
 
 exports.VerificationAgent.prototype._verifyWebId = function(webidUri, data, mediaTypeHeader, callback) {
     var that = this;
-    var mediaType = null;
+
+    this._parseAndLoad(mediaTypeHeader, webidUri, data, function(success, store){
+	if(success) {
+	    var query = that._buildVerificationQuery(webidUri, that.modulus, that.exponent);
+	    store.execute(query, function(success, result) {
+		if(success && result) {
+		    callback(false, {'webid':webidUri, 'store':store});
+		} else {
+		    callback(true, "Profile data does not match certificate information");
+		}
+	    });
+	} else {
+	    callback(true, "Error parsing profile document");
+	}
+    });
+};
+
+exports.VerificationAgent.prototype._buildVerificationQuery = function(webid, modulus, exponent) {
+    return "PREFIX : <http://www.w3.org/ns/auth/cert#>\
+	    PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\
+	    ASK {\
+               <"+webid+"> :key [\
+                 :modulus \""+modulus+"\"^^xsd:hexBinary;\
+                 :exponent "+exponent+";\
+               ] .\
+            }";
+};
+
+exports.VerificationAgent.prototype._parseAndLoad = function(mediaTypeHeader, webidUri, data, cb) {
     if(mediaTypeHeader === "application/rdf+xml") {
         mediaType = 'rdfxml';
     } else {
@@ -79,111 +106,45 @@ exports.VerificationAgent.prototype._verifyWebId = function(webidUri, data, medi
     var statements = "";
     var nextStatement = "";
 
-
     parser.on('statement', function(statement) {
         nextStatement = "<"+statement.subject.value+"><"+statement.predicate.value+">";
+        if(statement.subject.type === "uri") {
+            nextStatement = "<"+statement.subject.value+"><"+statement.predicate.value+">";	    
+	} else {
+            nextStatement = "_:"+statement.subject.value+"<"+statement.predicate.value+">";
+	}
+
         if(statement.object.type === "uri") {
             nextStatement = nextStatement + "<"+statement.object.value+">.";
-        } else {
+        } else if(statement.object.type === "bnode"){
+            nextStatement = nextStatement + "_:"+statement.object.value+".";
+	} else {
             if(statement.object.type === 'typed-literal') {
                 nextStatement = nextStatement + "\""+statement.object.value+"\"^^<"+statement.object.datatype+">.";
             } else {
                 nextStatement = nextStatement + "\""+statement.object.value+"\".";
             }
         }
+
         statements = statements+nextStatement;
     });
 
     parser.on('end', function(){
         rdfstore.create(function(store){
             store.load("text/turtle",statements,function(success, results) {
-                store.execute("PREFIX cert: <http://www.w3.org/ns/auth/cert#>\
-                               PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>\
-                               SELECT ?m ?e ?webid\
-                               WHERE {\
-                                 ?cert cert:identity ?webid ;\
-                                 rsa:modulus ?m ;\
-                                 rsa:public_exponent ?e .\
-                               }", function(success, results) {
-                                   if(success) {
-                                       var modulus = null;
-                                       var exponent = null;
-                                       for(var i=0; i<results.length; i++) {
-                                           if(results[i].webid && results[i].webid.value===webidUri) {
-                                               modulus = results[i].m;
-                                               exponent = results[i].e;
-                                           }
-                                       }
-                                       if(modulus!=null && exponent!=null) {
-                                           that._resolveModulusValue(store, modulus, function(modulus){
-                                               that._resolveExponentValue(store, exponent, function(exponent) {
-                                                   if(((""+that.modulus).toUpperCase()==(""+modulus).toUpperCase()) &&
-                                                      ((""+that.exponent).toUpperCase() == (""+exponent).toUpperCase())) {
-                                                       store.node(webidUri, function(success, graph) {
-                                                           callback(false, core.graphToJSONLD(graph, store.rdf)[0]);
-                                                       });
-                                                   } else {
-                                                       callback(true, "notMatchingCertificate");
-                                                   }
-                                               });
-                                           });
-                                       } else {
-                                           callback(true, "certficateDataNotFound");
-                                       }
-                                   } else {
-                                       callback(true, "certficateDataNotFound");
-                                   }
-                               });
-            });
-        });
-    });
+			   if(success) {
+			       cb(true, store);
+			   } else {
+			       cb(false, null);
+			   }
+	    });
+	});
+    });    
 
-    //parser.parseStart(webidUri);
-    parser.parseStart("http://test.com/something");
+    parser.parseStart(webidUri);
     parser.parseBuffer(new Buffer(data));
     parser.parseBuffer();
 };
-
-exports.VerificationAgent.prototype._resolveModulusValue = function(store, modulus, cb) {
-    if(modulus.token === 'uri') {
-        store.execute("SELECT ?v { <"+modulus.value+"><http://www.w3.org/ns/auth/cert#hex>?v }", function(success, results){
-            if(results.length == 1) {
-                cb(results[0].v.value);
-            } else {
-                store.execute("SELECT ?v { <"+modulus.value+"><http://www.w3.org/ns/auth/cert#decimal>?v }", function(success, results){
-                    cb(parseInt(results[0].v.value).toString(16));
-                })
-            }
-        });
-    } else {
-        if(modulus.type == "http://www.w3.org/ns/auth/cert#decimal") {
-            cb(parseInt(modulus.value).toString(16));
-        } else {
-            cb(modulus.value);
-        }
-    }
-};
-
-exports.VerificationAgent.prototype._resolveExponentValue = function(store, exponent, cb) {
-    if(exponent.token === 'uri') {
-        store.execute("SELECT ?v { <"+exponent.value+"><http://www.w3.org/ns/auth/cert#hex>?v }", function(success, results){
-            if(results.length == 1) {
-                cb(results[0].v.value);
-            } else {
-                store.execute("SELECT ?v { <"+exponent.value+"><http://www.w3.org/ns/auth/cert#decimal>?v }", function(success, results){
-                    cb(parseInt(results[0].v.value).toString(16));
-                }); 
-            }
-        });
-    } else {
-        if(exponent.type == "http://www.w3.org/ns/auth/cert#decimal") {
-            cb(parseInt(exponent.value).toString(16));
-        } else {
-            cb(exponent.value);
-        }
-    }
-};
-
 
 /**
  * Retrieves RDF data for WebID URI and returns it as a JSON object
@@ -191,7 +152,7 @@ exports.VerificationAgent.prototype._resolveExponentValue = function(store, expo
 exports.getWebID = function(uri, cb) {
     var that = this;
     var parsedUrl = url.parse(uri);
-    var options = {host: parsedUrl.host,
+    var options = {host: parsedUrl.hostname,
                    path: parsedUrl.pathname,
                    port: parsedUrl.port,
                    method: 'GET',
@@ -210,9 +171,9 @@ exports.getWebID = function(uri, cb) {
             });
 
             response.on('end', function(){
-                var mediaTypeHeader = (response.headers['content-type'] || response.headers['Content-Type'])
+                var mediaTypeHeader = (response.headers['content-type'] || response.headers['Content-Type']);
                 if(mediaTypeHeader) {
-                    if(mediaTypeHeader === "application/rdf+xml") {
+                    if(mediaTypeHeader.indexOf("application/rdf+xml")!=-1) {
                         var mediaType = 'rdfxml';
                     } else {
                         var mediaType = 'rdfa';
@@ -223,28 +184,106 @@ exports.getWebID = function(uri, cb) {
                     var nextStatement = "";
 
                     parser.on('statement', function(statement) {
-                        nextStatement = "<"+statement.subject.value+"><"+statement.predicate.value+">";
+			if(statement.subject.type === 'uri') {
+                            nextStatement = "<"+statement.subject.value+"><"+statement.predicate.value+">";
+			} else if(statement.subject.type === 'bnode') {
+                            nextStatement = "_:"+statement.subject.value+"<"+statement.predicate.value+">";
+			}
                         if(statement.object.type === "uri") {
                             nextStatement = nextStatement + "<"+statement.object.value+">.";
-                        } else {
-                            nextStatement = nextStatement + "\""+statement.object.value+"\".";
+                        } else if(statement.object.type === 'bnode') {
+                            nextStatement = nextStatement + "_:"+statement.object.value+".";			    
+			} else {
+			    if(statement.object.type === 'typed-literal') {
+				nextStatement = nextStatement + "\""+statement.object.value+"\"^^<"+statement.object.datatype+">.";
+			    } else {
+				nextStatement = nextStatement + "\""+statement.object.value+"\".";
+			    }
                         }
                         statements = statements+nextStatement;
                     });
 
                     parser.on('end', function(){
-                        rdfstore.create(function(store){
+                        core.makeDefaultEmptyStore(function(store){
                             store.load("text/turtle",statements,function(success, results) {
-                                store.node(uri, function(success, graph) {
-                                    var jsonld = core.graphToJSONLD(graph, store.rdf);
-                                    for(var i=0; i<jsonld.length; i++) {
-                                        var node = jsonld[i];
-                                        if(node['@subject'] === uri) {
-                                            return cb(false, node);
-                                        }
-                                    }
-                                    cb(true, "Invalid linked profile");
-                                });
+				store.graph(function(sccess, graph) {
+				    var nodes = core.graphToJSONLD(graph, store.rdf);
+				    var acum = {};
+				    var topNode = null;
+				    for(var i=0; i<nodes.length; i++) {
+					acum[nodes[i]['@subject']] = nodes[i];
+					if(nodes[i]['@subject'] === uri) {
+					    topNode = nodes[i];
+					}
+				    }
+				    if(topNode != null) {
+					var topNodeUri = topNode['@subject'];
+					var added = {topNodeUri: true};
+					var pending = [topNode];
+					while(pending.length != 0) {
+					    var currentNode = pending.pop();
+					    if(currentNode['@subject'].indexOf("_:") === 0) {
+						delete currentNode['@subject'];
+					    }
+
+					    console.log("=======\nPROCESSING:"+currentNode['@subject']);
+					    for(var p in currentNode) {
+						if(currentNode[p].constructor === Array) {
+						    var acumProps = [];
+						    for(var j=0; j<currentNode[p].length; j++) {
+							if(acum[currentNode[p][j]] != null && added[currentNode[p][j]] == null) {
+							    console.log("ADDING(1): "+currentNode[p][j]['@subject']);
+							    added[currentNode[p][j]] = true;
+							    pending.push(acum[currentNode[p][j]]);
+							    acumProps.push(acum[currentNode[p][j]]);
+							} else {
+							    acumProps.push(currentNode[p][j]);
+							}
+						    }
+						    currentNode[p] = acumProps;
+						} else {
+						    
+   						    if(p.indexOf('@')!=0 && acum[currentNode[p]] != null && added[currentNode[p]] == null) {
+							console.log("ADDING(2): "+currentNode[p]+" for property "+p);
+							added[currentNode[p]] = true;
+							pending.push(acum[currentNode[p]]);
+   							currentNode[p] = acum[currentNode[p]];
+   						    } else {
+							console.log("IGNORING");
+							console.log(currentNode[p]);
+							//console.log(acum[currentNode[p]]);
+							//console.log(added[currentNode[p]['@subject']]);
+							//console.log("---------\n\n");
+						    }
+						}
+					    }
+					}
+					if(topNode['foaf:primaryTopic'] == null) {
+					    core.jsonld.addValue(topNode, 'foaf:primaryTopic', topNode['@subject'], '@iri');
+					}
+					return cb(false, topNode);
+				    } else {
+					return cb(true, "Invalid linked profile");
+				    }
+				});
+
+                                //store.node(uri, function(success, graph) {
+                                //    var jsonld = core.graphToJSONLD(graph, store.rdf);
+                                //    for(var i=0; i<jsonld.length; i++) {
+                                //        var node = jsonld[i];
+                                //        if(node['@subject'] === uri) {
+				// 	    if(node['foaf:primaryTopic'] != null) {
+				//		return store.node(node['foaf:primaryTopic'], function(success, graph) {						
+				//		    var jsonld = core.graphToJSONLD(graph, store.rdf);
+				//		    return cb(false, jsonld[0]);
+				//		});
+				//	    } else {
+				//		return cb(false, node);
+				//	    }
+                                //        }
+                                //    }
+  			        //    return cb(true, "Invalid linked profile");
+                                //});
                             });
                         });
                     });
@@ -285,7 +324,7 @@ exports.generateCertificate = function(webid, password, path, callback) {
             try {
                 var data = JSON.parse(stdout);
                 var cert = core.vocabulary.auth.makeCertificate(data.modulus,
-                                                                data.exponent,
+                                                                ''+parseInt(''+data.exponent,16),
                                                                 data.webid);
 
                 callback(false, cert);
@@ -295,10 +334,3 @@ exports.generateCertificate = function(webid, password, path, callback) {
         }
     });
 };
-
-/**
- * Returns the WebID this server manages
- */
-exports.managedWebID = function() {
-
-}

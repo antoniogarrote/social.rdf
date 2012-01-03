@@ -66,7 +66,7 @@ exports.setup = function(mustGenerate, options, cb) {
             // node is a JSON-LD graph
             storeWebId(exports.vocabulary.auth.makeBasicProfile(newId), 
                        newId,
-                       true, node['rsa:modulus'], node['rsa:public_exponent']);
+                       true, node['cert:modulus'], node['cert:exponent']);
         });                                 
     }
 };
@@ -93,6 +93,7 @@ exports.graphToJSONLD = function(graph, rdf) {
 
         var property  = null;
         var isCURIE = false;
+
         property = rdf.prefixes.shrink(predicate);
 
         if(property != predicate) {
@@ -319,7 +320,7 @@ exports.jsonld = {
                     } else {
                         cb(true, results);
                     }
-                })
+                });
             });
         }
     }
@@ -339,13 +340,13 @@ exports.vocabulary = {
             if(configuration.public.port != null) {
                 uriBase = uriBase+":"+configuration.public.port;
             }
-            uriBase = uriBase + path + "/"
+            uriBase = uriBase + path + "/";
         } else {
             uriBase = "https://"+configuration.domain;
             if(configuration.admin.port != null) {
                 uriBase = uriBase+":"+configuration.admin.port;
             }
-            uriBase = uriBase + path + "/"
+            uriBase = uriBase + path + "/";
         }
 
         
@@ -395,7 +396,7 @@ exports.vocabulary = {
                     '@context': {
                         'srcfg': 'http://social-rdf.org/vocab/configuration#',
                         'rdfs': 'http://www.w3.org/2000/01/rdf-schema#'
-                    }}
+                    }};
         },
       
         makeUserAccount: function(webID) {
@@ -404,7 +405,7 @@ exports.vocabulary = {
                     '@context': {
                         'sioc': 'http://rdfs.org/sioc/ns#',
                         '@coerce': {'@iri':'sioc:account_of'}
-                    }}
+                    }};
         },
 
         makeExportedResource: function(name, label, help, resource, isPublic) {
@@ -417,10 +418,12 @@ exports.vocabulary = {
                     '@context': {
                         'srcfg': 'http://social-rdf.org/vocab/configuration#',
                         'rdfs': 'http://www.w3.org/2000/01/rdf-schema#'
-                    }}
+                    }};
         },
-
+        
         the_server: 'http://social-rdf.org/the_server',
+        stores_object_types: 'http://social-rdf.org/vocab/configuration#stores_object_types',
+        access_granted: 'http://social-rdf.org/vocab/configuration#access_granted',
         update_frequency: 'http://social-rdf.org/vocab/configuration#update_frequency',
         managed_by_extension: 'http://social-rdf.org/vocab/configuration#managed_by_extension',
         hasValue : 'http://social-rdf.org/vocab/configuration#hasValue',
@@ -458,21 +461,16 @@ exports.vocabulary = {
 
     auth: {
         makeCertificate: function(modulus,exponent,webID) {
-            var timestamp = new Date().getTime();
-            var subject = "http://social.rdf/certs/"+timestamp+exponent;
-            var cert = {'@subject': subject,
-                        'cert:identity': webID,
-                        'rsa:modulus': modulus,
-                        'rsa:public_exponent': exponent,
+            var cert = {'cert:modulus': modulus,
+                        'cert:exponent': exponent,
+			'@type': 'http://www.w3.org/ns/auth/cert#RSAPublicKey',
                         '@context':{
-                            'rsa': 'http://www.w3.org/ns/auth/rsa#',
                             'cert': 'http://www.w3.org/ns/auth/cert#'
                         }
                        };
 
-            exports.jsonld.coerce(cert, 'cert:identity', "@iri");
-            exports.jsonld.coerce(cert, 'rsa:modulus', "http://www.w3.org/ns/auth/cert#hex");
-            exports.jsonld.coerce(cert, 'rsa:public_exponent', "http://www.w3.org/ns/auth/cert#hex");
+            exports.jsonld.coerce(cert, 'cert:modulus', "http://www.w3.org/2001/XMLSchema#hexBinary");
+            exports.jsonld.coerce(cert, 'cert:exponent', "http://www.w3.org/2001/XMLSchema#integer");
 
             return cert;
         },
@@ -485,11 +483,12 @@ exports.vocabulary = {
                     'foaf:primaryTopic': webId,
                     '@context': {
                         'foaf': 'http://xmlns.com/foaf/0.1/',
+			'cert': 'http://www.w3.org/ns/auth/cert#',
                         '@coerce': {'@iri':[
                             'http://xmlns.com/foaf/0.1/maker',
                             'http://xmlns.com/foaf/0.1/primaryTopic'
                         ]}
-                    }}
+                    }};
         },
     },
 
@@ -537,14 +536,14 @@ exports.vocabulary = {
                         'srext': 'http://social-rdf.org/vocab/extensions#',
                         'rdfs': 'http://www.w3.org/2000/01/rdf-schema#',
                         '@coerce': {'@iri':'srext:dataPublished'}
-                    }}
+                    }};
         },
 
         bound_to: 'http://social-rdf.org/vocab/extensions#bound_to'
     },
 
     resources: {
-
+        Post:  'http://rdfs.org/sioc/types#Post',
         MicroBlogPost:  'http://rdfs.org/sioc/types#MicroblogPost'
     }
 };

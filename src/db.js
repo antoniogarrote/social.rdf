@@ -243,5 +243,24 @@ DB.prototype.saveWebHookRequest = function(webID, graph, cbURL, name, query, cb)
         });
     });
 };
+
+/**
+ * Returns all the types in the provided DB collection
+ */
+DB.prototype.typesInCollection = function(coll, cb) {
+    this.collection(coll, function(coll) {
+        coll.distinct('@type',{},cb);
+    });
+};
+
+/**
+ * Returns all the objects of a certain type
+ */
+DB.prototype.objectsByType = function(type, cb) {
+    this.collection('objects', function(coll) {
+        coll.find({'@type':type}).toArray(cb);
+    });
+};
+
 // Exports
 exports.DB = DB;

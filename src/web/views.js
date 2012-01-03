@@ -56,7 +56,7 @@ exports.renderNode = function(node, request, mediaType, cb){
     if(mediaType === 'json') {
         cb(false, node);
     } else {
-        var types = node['@type']        
+        var types = node['@type'];
         var template = mediaType+"/Post.js";
         
         utils.repeat(0, types.length, function(k, env){

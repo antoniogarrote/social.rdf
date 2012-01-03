@@ -3,8 +3,7 @@
       {{#ns}}
       xmlns:{{ns}}="{{iri}}"
       {{/ns}}
-      xmlns:cert='http://www.w3.org/ns/auth/rsa#'
-      xmlns:rsa='http://www.w3.org/ns/auth/cert#'>
+      xmlns:cert='http://www.w3.org/ns/auth/cert#'
   <head>
     <title>{{feedTitle}}</title>
     <link rel="stylesheet" href="/social/css/regularbootstrap.min.css">
@@ -19,33 +18,34 @@
       </div>
       <div class='row'><div class='span16'>&nbsp;</div></div>
       
-      {{#certificate}}
-         <div class='page-header'>
-           <h2>Certificate Info</h2>
-         </div>
 
-        <div about='{{@subject}}' id='certificate' class='row'>
-          <form>
-          <fieldset>
-          <div class='clearfix'>
-            <label>Public Exponent:</label>
-            <div class='input'>
-              <textarea property='rsa:modulus' class='xxlarge' rows='8' content='{{rsa:modulus}}'>
-                {{rsa:modulus}}
-              </textarea>
-            </div>
-          </div>
-          <div class='clearfix'>
-            <label>Modulus:</label>
-            <div class='input'>
-              <input property='rsa:public_exponent'' type='text' value='{{rsa:public_exponent}}'></input>
-            </div>
-          </div>
-          <a rel='cert:identity' type='hidden' href='{{cert:identity}}' style='display:none'>&nbsp;</a>
-          </fieldset>
-          </form>
-        </div>
-      {{/certificate}}
+       <div class='page-header'>
+	 <h2>Certificate Info</h2>
+       </div>
+
+      <div about='{{@subject}}' id='certificate' class='row'>
+	{{#cert:key}}
+	  <form>
+	  <fieldset>
+	  <div class='clearfix'>
+	    <label>Exponent:</label>
+	    <div class='input'>
+	      <textarea property='cert:modulus' class='xxlarge' rows='8' content='{{cert:modulus}}'>
+	        {{cert:modulus}}
+	      </textarea>
+	    </div>
+	  </div>
+	  <div class='clearfix'>
+	    <label>Modulus:</label>
+	    <div class='input'>
+	      <input property='cert:exponent' type='text' value='{{cert:exponent}}'></input>
+	    </div>
+	  </div>
+	  </fieldset>
+	  </form>
+	{{/cert:key}}
+      </div>
+
 
       <div class='page-header'>
         <h2>Properties</h2>

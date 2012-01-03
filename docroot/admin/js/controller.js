@@ -26,7 +26,8 @@
                                        'foaf:openid',
                                        'foaf:jabberID',
                                        'foaf:skypeID',
-                                       'foaf:publications'])
+                                       'foaf:publications']),
+        objectTypes: ko.observable([])
     };
 
     //
@@ -121,7 +122,7 @@
         // clean
         jQuery('#new-webid-property-modal .alert-message').hide();
         admin.controller.newPropertyWebID.selectedPropertyURI('other');
-        admin.controller.newPropertyWebID.customPropertyURI('')
+        admin.controller.newPropertyWebID.customPropertyURI('');
         admin.controller.newPropertyWebID.customValue('');
         admin.controller.newPropertyWebID.propertyTypeSelected('URI');
         admin.controller.newPropertyWebID.selectedXsdType('literal');
@@ -155,14 +156,14 @@
 
                                       if(found) {
                                           admin.controller.newPropertyWebID.selectedPropertyURI(shrinked);
-                                          admin.controller.newPropertyWebID.customPropertyURI('')
+                                          admin.controller.newPropertyWebID.customPropertyURI('');
                                       } else {
                                           admin.controller.newPropertyWebID.selectedPropertyURI('other');
-                                          admin.controller.newPropertyWebID.customPropertyURI(propURI)
+                                          admin.controller.newPropertyWebID.customPropertyURI(propURI);
                                       }
                                   } else {
                                       admin.controller.newPropertyWebID.selectedPropertyURI('other');
-                                      admin.controller.newPropertyWebID.customPropertyURI(propURI)
+                                      admin.controller.newPropertyWebID.customPropertyURI(propURI);
                                   }
                                   
                                   if(obj.token === 'literal') {
@@ -170,7 +171,7 @@
                                       if(obj.type != null) {
                                           if(obj.type.indexOf('http://www.w3.org/2001/XMLSchema#') === 0) {
                                               var shrinked = 'xsd:'+obj.type.split('http://www.w3.org/2001/XMLSchema#')[1];
-                                              var props = admin.controller.xsdTypes()
+                                              var props = admin.controller.xsdTypes();
                                               var found = false;
                                               for(var i=0; i<props.length; i++) {
                                                   if(props[i] === shrinked) {
@@ -226,10 +227,10 @@
             propertyValue = admin.controller.newPropertyWebID.customValue();
 
             if(admin.controller.newPropertyWebID.propertyTypeSelected() === 'URI') {
-                propertyType = 'uri'
+                propertyType = 'uri';
                 object = sko.rdf.createNamedNode(sko.rdf.prefixes.resolve(propertyValue));
             } else {
-                propertyType = 'literal'
+                propertyType = 'literal';
                 if(admin.controller.newPropertyWebID.selectedXsdType() === 'other') {
                     propertyDataType = admin.controller.newPropertyWebID.customDataType();
                     propertyDataType = sko.rdf.prefixes.resolve(propertyDataType);
@@ -264,7 +265,7 @@
                         // clean
                         jQuery('#new-webid-property-modal .alert-message').hide();
                         admin.controller.newPropertyWebID.selectedPropertyURI('other');
-                        admin.controller.newPropertyWebID.customPropertyURI('')
+                        admin.controller.newPropertyWebID.customPropertyURI('');
                         admin.controller.newPropertyWebID.customValue('');
                         admin.controller.newPropertyWebID.propertyTypeSelected('URI');
                         admin.controller.newPropertyWebID.selectedXsdType('literal');
@@ -300,7 +301,7 @@
     //
     admin.controller.accountsWebID = {
         selectedAccount: ko.observable()
-    }
+    };
 
     admin.controller.accountsWebID.selectedProperties = ko.observable([]);
     admin.controller.accountsWebID.selectedPropertiesUpdater = ko.dependentObservable(function(){
@@ -336,7 +337,7 @@
                                               console.log(res);
      
                                           }
-                                      })
+                                      });
                 } else {
                     console.log("*** Error selecting properties for account:"+accountURI);
                     console.log(res);
@@ -440,6 +441,43 @@
         }
     };
 
+    //
+    // Selects the object browser
+    //  
+    admin.controller.showObjectBrowser = function() {
+        this.selectedExtension("<http://social-rdf.org/vocab/objectBrowser>");
+    };
+
+    // 
+    // Selects a type of object in the object browser
+    //
+    admin.controller.selectObjectType = function(objectType) {
+        jQuery.ajax({
+                  'url': '/admin/objects',
+                  'accepts': 'application/json',
+                  'type': 'GET',
+                  'data': {
+		      'type':objectType
+		  },
+                  'error': function(xhr, status, error){
+                      console.log("STATUS:"+status);
+                      alert('ERROR:'+error);
+                  },
+                  'success': function(data, status, xhr) {
+                      if(status === 'success') {
+			  sko.store.load("application/json", data, function(success, msg) {
+					     console.log("loaded: "+msg);
+					     alert("Object of type "+objectType+" loaded");
+					 });
+                      } else {
+                          console.log("STATUS:"+status);
+                          alert('ERROR:'+data);
+                      }
+                  }
+              });
+        	
+    };
+
     // Selects a extension
     //
     admin.controller.selectExtension = function(iri) {
@@ -450,7 +488,7 @@
     //  Checks if the WebID is local or external
     //
     admin.controller.isLocalWebID = function() {
-        var res
+        var res;
         sko.store.execute("SELECT ?isLocal { <http://social-rdf.org/vocab/configuration#the_server>\
                                              <http://social-rdf.org/vocab/configuration#is_local_webid> ?isLocal }", function(scc, triples) {
                                                  if(triples[0].isLocal.value==='true') {
@@ -481,7 +519,7 @@
 
         // add the configuration options
         for(var i=0; i<configurationOptions.length; i++) {
-            var uri = sko.plainUri(configurationOptions[i].about())
+            var uri = sko.plainUri(configurationOptions[i].about());
             sko.store.execute("select ?p ?o { <"+uri+"> ?p ?o }", function(res, vals) {
                 if(res) {
                     var jsonld = { '@context': {'@coerce':{}},
@@ -510,7 +548,7 @@
         }
         for(var i=0; i<uriBindings.length; i++) {
 
-            var uri = sko.plainUri(uriBindings[i].about())
+            var uri = sko.plainUri(uriBindings[i].about());
             sko.store.execute("select ?p ?o { <"+uri+"> ?p ?o }", function(res, vals) {
                 if(res) {
                     var jsonld = { '@context': {'@coerce':{}},
@@ -613,6 +651,17 @@
                 }
                 res = triples.length>0;
             });
+
+            sko.store.startObservingQuery("SELECT ?type WHERE { <http://social-rdf.org/the_server>  <http://social-rdf.org/vocab/configuration#stores_object_types> ?type }", function(triples) {
+                var acum = [];
+                for(var i=0; i<triples.length; i++) {
+                    triples[i].type.binding = "<"+triples[i].type.value+">";
+                    triples[i].type.label = "sioc:"+(triples[i].type.value.split("#")[1]);		    
+                    acum.push(triples[i].type);
+                }
+                admin.controller.objectTypes(acum);
+            });
+            
             return res;
         });              
 

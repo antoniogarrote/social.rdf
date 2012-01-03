@@ -4,10 +4,9 @@
 try {
   console = console || {};
 } catch(e) {
-  console = console || {};
+  console = {};
   console.log = function(e){};
 }
-
 var Utils = {};
 
 
@@ -343,6 +342,8 @@ Utils.lexicalFormBaseUri = function(term, env) {
         var resolvedPrefix = env.namespaces[prefix];
         if(resolvedPrefix != null) {            
             uri = resolvedPrefix+suffix;
+        } else {
+            uri = prefix+":"+suffix;
         }
     } else {
         //console.log(" - URI is not prefixed");
@@ -1694,6 +1695,19 @@ Lexicon.Lexicon.prototype.resolveUri = function(uri) {
     }
 };
 
+Lexicon.Lexicon.prototype.resolveUriCost = function(uri) {
+    if(uri === this.defaultGraphUri) {
+        return(this.defaultGraphOid);
+    } else {
+        var oidCounter = this.uriToOID[uri];
+        if(oidCounter != null) {
+            return(oidCounter[1]);
+        } else {
+            return(-1);
+        }
+    }
+};
+
 Lexicon.Lexicon.prototype.registerBlank = function(label) {
     var oid = this.oidCounter;
     this.oidCounter++;
@@ -1712,6 +1726,10 @@ Lexicon.Lexicon.prototype.resolveBlank = function(label) {
     var oid = this.oidCounter;
     this.oidCounter++
     return(""+oid);
+};
+
+Lexicon.Lexicon.prototype.resolveBlankCost = function(label) {
+    return 0;
 };
 
 Lexicon.Lexicon.prototype.registerLiteral = function(literal) {
@@ -1742,9 +1760,19 @@ Lexicon.Lexicon.prototype.resolveLiteral = function(literal) {
     }
 }
 
+Lexicon.Lexicon.prototype.resolveLiteralCost = function(literal) {
+    var oidCounter = this.literalToOID[literal];
+    if(oidCounter != null ) {
+        return(oidCounter[1]); 
+    } else {
+        return(0); 
+    }
+}
+
+
 Lexicon.Lexicon.prototype.parseLiteral = function(literalString) {
     var parts = literalString.lastIndexOf("@");
-    if(parts!=-1 && literalString[parts-1]==='"') {
+    if(parts!=-1 && literalString[parts-1]==='"' && literalString.substring(parts, literalString.length).match(/^@[a-zA-Z\-]+$/g)!=null) {
         var value = literalString.substring(1,parts-1);
         var lang = literalString.substring(parts+1, literalString.length);
         return {token: "literal", value:value, lang:lang};
@@ -1950,17 +1978,8 @@ var _setMembers = function(self, obj)
    }
 };
 
-// define jsonld
-if(typeof(window) !== 'undefined')
-{
-   var jsonld = window.jsonld = window.jsonld || {};
-   Exception = function(obj)
-   {
-      _setMembers(this, obj);
-   }
-}
 // define node.js module
-else if(typeof(module) !== 'undefined' && module.exports)
+if(typeof(module) !== 'undefined' && module.exports)
 {
    var jsonld = {};
    Exception = function(obj)
@@ -1968,6 +1987,25 @@ else if(typeof(module) !== 'undefined' && module.exports)
       _setMembers(this, obj);
       this.stack = new Error().stack;
    };
+}
+// define jsonld
+else if(typeof(window) !== 'undefined')
+{
+   var jsonld = window.jsonld = window.jsonld || {};
+   Exception = function(obj)
+   {
+      _setMembers(this, obj);
+   }
+}
+// Web worker running in the browser
+else 
+{
+    window = {};
+    var jsonld = window.jsonld = {};
+   Exception = function(obj)
+   {
+      _setMembers(this, obj);
+   }
 }
 
 jsonldParser = jsonld;
@@ -2048,7 +2086,7 @@ var _clone = function(value)
    if(value.constructor === Object)
    {
       rval = {};
-      var keys = Object.keys(value).sort();
+      var keys = Utils.keys(value).sort();
       for(var i in keys)
       {
          var key = keys[i];
@@ -2338,7 +2376,7 @@ jsonld.compact = function(ctx, input)
          var out = new Processor().compact(_clone(ctx), null, tmp[i], ctxOut);
          
          // add context if used
-         if(Object.keys(ctxOut).length > 0)
+         if(Utils.keys(ctxOut).length > 0)
          {
             out['@context'] = ctxOut;
          }
@@ -3017,7 +3055,7 @@ Processor.prototype.normalize = function(input)
       {
          var s = subjects[key];
          var sorted = {};
-         var keys = Object.keys(s).sort();
+         var keys = Utils.keys(s).sort();
          for(var i in keys)
          {
             var k = keys[i];
@@ -3748,7 +3786,7 @@ Processor.prototype.canonicalizeBlankNodes = function(input)
          }
          
          // sort keys by value to name them in order
-         var keys = Object.keys(mapping);
+         var keys = Utils.keys(mapping);
          keys.sort(function(a, b)
          {
             return _compare(mapping[a], mapping[b]);
@@ -4106,7 +4144,7 @@ Processor.prototype.serializeCombos = function(
    // no more adjacent bnodes to map, update serialization
    else
    {
-      var keys = Object.keys(mapped).sort();
+      var keys = Utils.keys(mapped).sort();
       mb.adj[siri] = { i: iri, k: keys, m: mapped };
       mb.serialize(this.subjects, this.edges);
       
@@ -4278,7 +4316,7 @@ Processor.prototype.deepCompareBlankNodes = function(a, b)
                {
                   // keep same mapping and count from 'props' serialization
                   mb.mapping = _clone(sA['props'].m);
-                  mb.count = Object.keys(mb.mapping).length + 1;
+                  mb.count = Utils.keys(mb.mapping).length + 1;
                }
                this.serializeBlankNode(sA, iriA, mb, dir);
             }
@@ -4289,7 +4327,7 @@ Processor.prototype.deepCompareBlankNodes = function(a, b)
                {
                   // keep same mapping and count from 'props' serialization
                   mb.mapping = _clone(sB['props'].m);
-                  mb.count = Object.keys(mb.mapping).length + 1;
+                  mb.count = Utils.keys(mb.mapping).length + 1;
                }
                this.serializeBlankNode(sB, iriB, mb, dir);
             }
@@ -4328,8 +4366,8 @@ Processor.prototype.shallowCompareBlankNodes = function(a, b)
       5.2. The bnode with the alphabetically-first reference iri is first.
       5.3. The bnode with the alphabetically-first reference property is first.
     */
-   var pA = Object.keys(a);
-   var pB = Object.keys(b);
+   var pA = Utils.keys(a);
+   var pB = Utils.keys(b);
    
    // step #1
    rval = _compare(pA.length, pB.length);
@@ -4537,7 +4575,7 @@ var _isDuckType = function(input, frame)
    if(!(type in frame))
    {
       // get frame properties that must exist on input
-      var props = Object.keys(frame).filter(function(e)
+      var props = Utils.keys(frame).filter(function(e)
       {
          // filter non-keywords
          return e.indexOf('@') !== 0;
@@ -5200,6 +5238,8 @@ AbstractQueryTree.AbstractQueryTree.prototype.collectBasicTriples = function(aqt
         acum = this.collectBasicTriples(aqt.rvalue, acum);
     } else if(aqt.kind === 'FILTER') {
         acum = this.collectBasicTriples(aqt.value, acum);
+    } else if(aqt.kind === 'construct') {
+        acum = this.collectBasicTriples(aqt.pattern,acum);
     } else if(aqt.kind === 'EMPTY_PATTERN') {
         // nothing
     } else {
@@ -8489,7 +8529,7 @@ SparqlParser.parser = (function(){
         }
         var result2 = result1 !== null
           ? (function(t, gs, w, sm) {
-                var dataset = {named:[], 'default':[]};
+                var dataset = {'named':[], 'default':[]};
                 for(var i=0; i<gs.length; i++) {
                     var g = gs[i];
                     if(g.kind === 'default') {
@@ -18601,32 +18641,178 @@ SparqlParser.parser = (function(){
           var result4 = [];
           var savedPos2 = pos;
           var result6 = [];
-          var result11 = parse_WS();
-          while (result11 !== null) {
-            result6.push(result11);
-            var result11 = parse_WS();
+          var result25 = parse_WS();
+          while (result25 !== null) {
+            result6.push(result25);
+            var result25 = parse_WS();
           }
           if (result6 !== null) {
-            if (input.substr(pos, 5) === "UNION") {
-              var result7 = "UNION";
-              pos += 5;
+            if (input.substr(pos, 1) === "U") {
+              var result24 = "U";
+              pos += 1;
             } else {
-              var result7 = null;
+              var result24 = null;
               if (reportMatchFailures) {
-                matchFailed("\"UNION\"");
+                matchFailed("\"U\"");
               }
             }
+            if (result24 !== null) {
+              var result7 = result24;
+            } else {
+              if (input.substr(pos, 1) === "u") {
+                var result23 = "u";
+                pos += 1;
+              } else {
+                var result23 = null;
+                if (reportMatchFailures) {
+                  matchFailed("\"u\"");
+                }
+              }
+              if (result23 !== null) {
+                var result7 = result23;
+              } else {
+                var result7 = null;;
+              };
+            }
             if (result7 !== null) {
-              var result8 = [];
-              var result10 = parse_WS();
-              while (result10 !== null) {
-                result8.push(result10);
-                var result10 = parse_WS();
+              if (input.substr(pos, 1) === "N") {
+                var result22 = "N";
+                pos += 1;
+              } else {
+                var result22 = null;
+                if (reportMatchFailures) {
+                  matchFailed("\"N\"");
+                }
+              }
+              if (result22 !== null) {
+                var result8 = result22;
+              } else {
+                if (input.substr(pos, 1) === "n") {
+                  var result21 = "n";
+                  pos += 1;
+                } else {
+                  var result21 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"n\"");
+                  }
+                }
+                if (result21 !== null) {
+                  var result8 = result21;
+                } else {
+                  var result8 = null;;
+                };
               }
               if (result8 !== null) {
-                var result9 = parse_GroupGraphPattern();
+                if (input.substr(pos, 1) === "I") {
+                  var result20 = "I";
+                  pos += 1;
+                } else {
+                  var result20 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"I\"");
+                  }
+                }
+                if (result20 !== null) {
+                  var result9 = result20;
+                } else {
+                  if (input.substr(pos, 1) === "i") {
+                    var result19 = "i";
+                    pos += 1;
+                  } else {
+                    var result19 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"i\"");
+                    }
+                  }
+                  if (result19 !== null) {
+                    var result9 = result19;
+                  } else {
+                    var result9 = null;;
+                  };
+                }
                 if (result9 !== null) {
-                  var result5 = [result6, result7, result8, result9];
+                  if (input.substr(pos, 1) === "O") {
+                    var result18 = "O";
+                    pos += 1;
+                  } else {
+                    var result18 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"O\"");
+                    }
+                  }
+                  if (result18 !== null) {
+                    var result10 = result18;
+                  } else {
+                    if (input.substr(pos, 1) === "o") {
+                      var result17 = "o";
+                      pos += 1;
+                    } else {
+                      var result17 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"o\"");
+                      }
+                    }
+                    if (result17 !== null) {
+                      var result10 = result17;
+                    } else {
+                      var result10 = null;;
+                    };
+                  }
+                  if (result10 !== null) {
+                    if (input.substr(pos, 1) === "N") {
+                      var result16 = "N";
+                      pos += 1;
+                    } else {
+                      var result16 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"N\"");
+                      }
+                    }
+                    if (result16 !== null) {
+                      var result11 = result16;
+                    } else {
+                      if (input.substr(pos, 1) === "n") {
+                        var result15 = "n";
+                        pos += 1;
+                      } else {
+                        var result15 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"n\"");
+                        }
+                      }
+                      if (result15 !== null) {
+                        var result11 = result15;
+                      } else {
+                        var result11 = null;;
+                      };
+                    }
+                    if (result11 !== null) {
+                      var result12 = [];
+                      var result14 = parse_WS();
+                      while (result14 !== null) {
+                        result12.push(result14);
+                        var result14 = parse_WS();
+                      }
+                      if (result12 !== null) {
+                        var result13 = parse_GroupGraphPattern();
+                        if (result13 !== null) {
+                          var result5 = [result6, result7, result8, result9, result10, result11, result12, result13];
+                        } else {
+                          var result5 = null;
+                          pos = savedPos2;
+                        }
+                      } else {
+                        var result5 = null;
+                        pos = savedPos2;
+                      }
+                    } else {
+                      var result5 = null;
+                      pos = savedPos2;
+                    }
+                  } else {
+                    var result5 = null;
+                    pos = savedPos2;
+                  }
                 } else {
                   var result5 = null;
                   pos = savedPos2;
@@ -18647,32 +18833,178 @@ SparqlParser.parser = (function(){
             result4.push(result5);
             var savedPos2 = pos;
             var result6 = [];
-            var result11 = parse_WS();
-            while (result11 !== null) {
-              result6.push(result11);
-              var result11 = parse_WS();
+            var result25 = parse_WS();
+            while (result25 !== null) {
+              result6.push(result25);
+              var result25 = parse_WS();
             }
             if (result6 !== null) {
-              if (input.substr(pos, 5) === "UNION") {
-                var result7 = "UNION";
-                pos += 5;
+              if (input.substr(pos, 1) === "U") {
+                var result24 = "U";
+                pos += 1;
               } else {
-                var result7 = null;
+                var result24 = null;
                 if (reportMatchFailures) {
-                  matchFailed("\"UNION\"");
+                  matchFailed("\"U\"");
                 }
               }
+              if (result24 !== null) {
+                var result7 = result24;
+              } else {
+                if (input.substr(pos, 1) === "u") {
+                  var result23 = "u";
+                  pos += 1;
+                } else {
+                  var result23 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"u\"");
+                  }
+                }
+                if (result23 !== null) {
+                  var result7 = result23;
+                } else {
+                  var result7 = null;;
+                };
+              }
               if (result7 !== null) {
-                var result8 = [];
-                var result10 = parse_WS();
-                while (result10 !== null) {
-                  result8.push(result10);
-                  var result10 = parse_WS();
+                if (input.substr(pos, 1) === "N") {
+                  var result22 = "N";
+                  pos += 1;
+                } else {
+                  var result22 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"N\"");
+                  }
+                }
+                if (result22 !== null) {
+                  var result8 = result22;
+                } else {
+                  if (input.substr(pos, 1) === "n") {
+                    var result21 = "n";
+                    pos += 1;
+                  } else {
+                    var result21 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"n\"");
+                    }
+                  }
+                  if (result21 !== null) {
+                    var result8 = result21;
+                  } else {
+                    var result8 = null;;
+                  };
                 }
                 if (result8 !== null) {
-                  var result9 = parse_GroupGraphPattern();
+                  if (input.substr(pos, 1) === "I") {
+                    var result20 = "I";
+                    pos += 1;
+                  } else {
+                    var result20 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"I\"");
+                    }
+                  }
+                  if (result20 !== null) {
+                    var result9 = result20;
+                  } else {
+                    if (input.substr(pos, 1) === "i") {
+                      var result19 = "i";
+                      pos += 1;
+                    } else {
+                      var result19 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"i\"");
+                      }
+                    }
+                    if (result19 !== null) {
+                      var result9 = result19;
+                    } else {
+                      var result9 = null;;
+                    };
+                  }
                   if (result9 !== null) {
-                    var result5 = [result6, result7, result8, result9];
+                    if (input.substr(pos, 1) === "O") {
+                      var result18 = "O";
+                      pos += 1;
+                    } else {
+                      var result18 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"O\"");
+                      }
+                    }
+                    if (result18 !== null) {
+                      var result10 = result18;
+                    } else {
+                      if (input.substr(pos, 1) === "o") {
+                        var result17 = "o";
+                        pos += 1;
+                      } else {
+                        var result17 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"o\"");
+                        }
+                      }
+                      if (result17 !== null) {
+                        var result10 = result17;
+                      } else {
+                        var result10 = null;;
+                      };
+                    }
+                    if (result10 !== null) {
+                      if (input.substr(pos, 1) === "N") {
+                        var result16 = "N";
+                        pos += 1;
+                      } else {
+                        var result16 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"N\"");
+                        }
+                      }
+                      if (result16 !== null) {
+                        var result11 = result16;
+                      } else {
+                        if (input.substr(pos, 1) === "n") {
+                          var result15 = "n";
+                          pos += 1;
+                        } else {
+                          var result15 = null;
+                          if (reportMatchFailures) {
+                            matchFailed("\"n\"");
+                          }
+                        }
+                        if (result15 !== null) {
+                          var result11 = result15;
+                        } else {
+                          var result11 = null;;
+                        };
+                      }
+                      if (result11 !== null) {
+                        var result12 = [];
+                        var result14 = parse_WS();
+                        while (result14 !== null) {
+                          result12.push(result14);
+                          var result14 = parse_WS();
+                        }
+                        if (result12 !== null) {
+                          var result13 = parse_GroupGraphPattern();
+                          if (result13 !== null) {
+                            var result5 = [result6, result7, result8, result9, result10, result11, result12, result13];
+                          } else {
+                            var result5 = null;
+                            pos = savedPos2;
+                          }
+                        } else {
+                          var result5 = null;
+                          pos = savedPos2;
+                        }
+                      } else {
+                        var result5 = null;
+                        pos = savedPos2;
+                      }
+                    } else {
+                      var result5 = null;
+                      pos = savedPos2;
+                    }
                   } else {
                     var result5 = null;
                     pos = savedPos2;
@@ -18711,9 +19043,9 @@ SparqlParser.parser = (function(){
           
                     for(var i=0; i<b.length; i++) {
                         if(i==b.length-1) {
-                            lastToken.value.push(b[i][3]);
+                            lastToken.value.push(b[i][7]);
                         } else {
-                            lastToken.value.push(b[i][3]);
+                            lastToken.value.push(b[i][7]);
                             var newToken = {token: 'graphunionpattern',
                                             value: [lastToken]}
           
@@ -21472,7 +21804,7 @@ SparqlParser.parser = (function(){
           ? (function(pl) {
           
                 GlobalBlankNodeCounter++;
-                var subject = {token:'blank', label:''+GlobalBlankNodeCounter};
+                var subject = {token:'blank', label:'_:'+GlobalBlankNodeCounter};
                 var newTriples =  [];
           
                 for(var i=0; i< pl.pairs.length; i++) {
@@ -30864,7 +31196,7 @@ SparqlParser.parser = (function(){
           var savedPos0 = pos;
           var result2 = parse_ANON();
           var result3 = result2 !== null
-            ? (function() { GlobalBlankNodeCounter++; return {token:'blank', label:''+GlobalBlankNodeCounter} })()
+            ? (function() { GlobalBlankNodeCounter++; return {token:'blank', label:'_:'+GlobalBlankNodeCounter} })()
             : null;
           if (result3 !== null) {
             var result1 = result3;
@@ -34010,7 +34342,6 @@ SparqlParser.parser = (function(){
   return result;
 })();
 
-
 // end of ./src/js-sparql-parser/src/sparql_parser.js 
 // exports
 var TurtleParser = {};
@@ -34162,7 +34493,11 @@ RDFJSInterface.UrisMap.prototype.resolve = function(curie) {
     var ns = parts[0];
     var suffix = parts[1];
     if(ns === '') {
-        return this.defaultNs + suffix;
+        if(this.defaultNs == null) {
+            return null;
+        } else {
+            return this.defaultNs + suffix;
+        }
     } else if(this[ns] != null) {
         return this[ns] + suffix;
     } else {
@@ -34174,7 +34509,7 @@ RDFJSInterface.UrisMap.prototype.shrink = function(iri) {
     for(var ns in this) {
         var prefix = this[ns];
         if(iri.indexOf(prefix) === 0) {
-            if(prefix !== '') {
+            if(prefix !== '' && ns != 'defaultNs') {
                 var suffix = iri.split(prefix)[1];
                 return ns + ":" + suffix;
             }
@@ -36395,17 +36730,9 @@ QueryFilters.runIriRefOrFunction = function(iriref, args, bindings,queryEngine, 
 
 // end of ./src/js-query-engine/src/query_filters.js 
 // exports
-var QueryPlan = {};
+var QueryPlanDPSize = {};
 
-// imports
-
-QueryPlan.orderJoins = function(bgps) {
-    // @todo order joins somehow
-    return bgps;
-};
-
-
-QueryPlan.variablesInBGP = function(bgp) {
+QueryPlanDPSize.variablesInBGP = function(bgp) {
     // may be cached in the pattern
     var variables = bgp.variables;
     if(variables) {
@@ -36426,10 +36753,21 @@ QueryPlan.variablesInBGP = function(bgp) {
     return variables;
 };
 
-QueryPlan.variablesIntersectionBGP = function(bgpa, bgpb) {
-    var varsa = QueryPlan.variablesInBGP(bgpa).sort();
-    var varsb = QueryPlan.variablesInBGP(bgpb).sort();
+QueryPlanDPSize.connected = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            return true;
+        }
+    }
 
+    return false;
+};
+
+// @modified dp
+QueryPlanDPSize.variablesIntersectionBGP = function(bgpa, bgpb) {
+    var varsa = QueryPlanDPSize.variablesInBGP(bgpa).sort();
+    var varsb = QueryPlanDPSize.variablesInBGP(bgpb).sort();
     var ia = 0;
     var ib = 0;
 
@@ -36450,108 +36788,327 @@ QueryPlan.variablesIntersectionBGP = function(bgpa, bgpb) {
     return intersection;
 };
 
-QueryPlan.executeAndBGPs = function(bgps, dataset, queryEngine, env) {
-    //for(var i=0; i<bgps.length; i++) {
-    //    if(bgps[i].graph == null) {
-    //        bgps[i].graph = dataset;
-    //    } else if(dataset != null && dataset.length != 0) {
-    //        bgps[i].graph = dataset;
-    //    }
-    //}
-    var pairs = Utils.partition(bgps,2);
-    return QueryPlan.buildBushyJoinTreeBase(pairs, dataset, queryEngine, env);
-};
+//@modified dp
+/**
+ * All BGPs sharing variables are grouped together.
+ */
+QueryPlanDPSize.executeAndBGPsGroups = function(bgps) {
+    var groups = {};
+    var groupVars = {};
+    var groupId = 0;
+    for(var i=0; i<bgps.length; i++) {
+        var bgp = bgps[i];
 
-QueryPlan.buildBushyJoinTreeBase = function(pairs, dataset, queryEngine, queryEnv) {
+        var vars = [];
+        for(var comp in bgp) {
+            if(comp != '_cost') {
+                if(bgp[comp].token === 'var') {
+                    vars.push(bgp[comp].value)
+                } else if(bgp[comp].token === 'blank') {
+                    vars.push(bgp[comp].label);
+                }
+            }
+        }
+
+        var foundGroup = false;
+        for(var nextGroupId in groupVars) {
+            groupVar = groupVars[nextGroupId];
+            for(var j=0; j<vars.length; j++) {
+                var thisVar = "/"+vars[j]+"/";
+                if(groupVar.indexOf(thisVar) != -1) {
+                    groups[nextGroupId].push(bgp);
+                    groupVars[nextGroupId] = groupVar+(vars.join("/"))+"/"
+                    foundGroup = true;
+                    break;
+                }
+            }
+            if(foundGroup)
+                break;
+        }
+        if(!foundGroup) {
+            groups[groupId] = [bgp];
+            groupVars[groupId] = "/"+(vars.join("/"))+"/";
+            groupId++;
+        }
+    }
+
     var acum = [];
-    for(var i=0; i<pairs.length; i++) {
-        var pair = pairs[i];
-        var bgpa = pair[0];
-        var bgpb = pair[1];
-        results = QueryPlan.executeAndBGP(bgpa,bgpb, dataset, queryEngine, queryEnv);
-        if(results!=null) {
-            acum.push(results);
-
-        } else {
-            return null;
-        }
+    for(var groupId in groups) {
+        acum.push(groups[groupId]);
     }
-    return QueryPlan.buildBushyJoinTreeBranches(acum);
+
+    return acum;
 };
 
-// @todo
-// remove recursion here
-QueryPlan.buildBushyJoinTreeBranches = function(bindingsList) {
-    if(bindingsList.length === 1){
-        return bindingsList[0];
-    } else {
-        var pairs = Utils.partition(bindingsList,2);
-        var acum = [];
-        for(var i=0; i<pairs.length; i++) {
-            var pair = pairs[i];
-            var bindingsa = pair[0];
-            var bindingsb = pair[1];
-            var result =  QueryPlan.executeAndBindings(bindingsa, bindingsb);
-            acum.push(result);
+// @modified dp
+QueryPlanDPSize.intersectionSize = function(leftPlan, rightPlan) {
+    var idsRight = rightPlan.i.split("_");
+    for(var i=0; i<idsRight.length; i++) {
+        if(idsRight[i]=="")
+            continue;
+        if(leftPlan.i.indexOf('_'+idsRight[i]+'_') != -1) {
+            return 1; // we just need to know if this value is >0
         }
-        return QueryPlan.buildBushyJoinTreeBranches(acum);
     }
+    return 0;
 };
 
-QueryPlan.executeAndBindings = function(bindingsa, bindingsb) {
-    if(bindingsa==null) {
-        return bindingsb;
-    } else if(bindingsb==null) {
-        return bindingsa;
-    } else {
-        if(bindingsa==[] || bindingsb==[]) {
-            return [];
-        } else {
-            if(QueryPlan.variablesIntersectionBindings(bindingsa[0],bindingsb[0]).length == 0) {
-                return QueryPlan.crossProductBindings(bindingsa,bindingsb);
+// @modified dp
+QueryPlanDPSize.createJoinTree = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    var acumVars = leftPlan.vars.concat([]);
+    var join = [];
+
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            if(rightPlan.vars[i].indexOf("_:") == 0) {
+                join.push("blank:"+rightPlan.vars[i]);
             } else {
-                return QueryPlan.joinBindings(bindingsa,bindingsb);
+                join.push(rightPlan.vars[i]);
+            }
+        } else {
+            acumVars.push(rightPlan.vars[i]);
+        }
+    }
+
+    var rightIds = rightPlan.i.split("_");
+    var leftIds = leftPlan.i.split("_");
+    var distinct = {};
+    for(var i=0; i<rightIds.length; i++) {
+        if(rightIds[i] != "") {
+            distinct[rightIds[i]] = true;
+        }
+    }
+    for(var i=0; i<leftIds.length; i++) {
+        if(leftIds[i] != "") {
+            distinct[leftIds[i]] = true;
+        }
+    }
+    var ids = [];
+    for(var id in distinct) {
+        ids.push(id);
+    }
+
+    // new join tree
+    return {
+        left: leftPlan,
+        right: rightPlan,
+        cost: leftPlan.cost+rightPlan.cost,
+        i: "_"+(ids.sort().join("_"))+"_",
+        vars: acumVars,
+        join: join
+    };
+};
+
+// @modified dp
+QueryPlanDPSize.executeBushyTree = function(treeNode, dataset, queryEngine, env) {
+    if(treeNode.left == null ) {
+        //console.log("*** join empty left"+treeNode.i);
+        //console.log(treeNode);
+        return QueryPlanDPSize.executeEmptyJoinBGP(treeNode.right, dataset, queryEngine, env);
+    } else if(treeNode.right == null) {
+        //console.log("*** executing left empty join "+treeNode.i);
+        //console.log(treeNode);
+        return QueryPlanDPSize.executeEmptyJoinBGP(treeNode.left, dataset, queryEngine, env);
+    } else {
+        //console.log("*** executing left:"+treeNode.i);
+        //console.log(treeNode.left);
+        var resultsLeft = QueryPlanDPSize.executeBushyTree(treeNode.left, dataset, queryEngine, env);
+        //console.log("-left:");
+        //console.log(success);
+        //console.log(resultsLeft);
+
+        if(resultsLeft!=null) {
+            //console.log("*** executing right:"+treeNode.i);
+            //console.log(treeNode.right);
+            var resultsRight = QueryPlanDPSize.executeBushyTree(treeNode.right, dataset, queryEngine, env);
+            //console.log("-right:");
+            //console.log(success);
+            //console.log(resultsRight);
+            if(resultsRight!=null) {
+                //var joinVars = QueryPlanDPSize.variablesIntersectionBGP(treeNode.left,treeNode.right);
+                //console.log("*** BACK executing right -> "+treeNode.i);
+                //console.log("**  left:");
+                //console.log(resultsLeft);
+                //console.log("**  right:");
+                //console.log(resultsRight);
+                //console.log("JOINING...");
+                //console.log(resultsLeft);
+                //console.log(resultsRight);
+                //console.log("--------------");
+                var bindings = QueryPlanDPSize.joinBindings2(treeNode.join, resultsLeft, resultsRight);
+                //var bindings = QueryPlanDPSize.joinBindings(resultsLeft, resultsRight);
+                //console.log(bindings);
+                return bindings;
+            } else {
+                return null
             }
         }
     }
 };
 
-QueryPlan.executeAndBGP = function(bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    if(bgpa==null) {
-        return QueryPlan.executeEmptyJoinBGP(bgpb, dataset, queryEngine, queryEnv);
-    } else if(bgpb==null) {
-        return QueryPlan.executeEmptyJoinBGP(bgpa, dataset, queryEngine, queryEnv);
-    } else {
-        var joinVars = QueryPlan.variablesIntersectionBGP(bgpa,bgpb);
-        if(joinVars.length === 0) {
-            // range a, range b -> cartesian product
-            return QueryPlan.executeCrossProductBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv);
-        } else {
-            // join on intersection vars
-            return QueryPlan.executeJoinBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv);
+
+//@modified dp
+QueryPlanDPSize.executeAndBGPsDPSize = function(allBgps, dataset, queryEngine, env) {
+    var groups = QueryPlanDPSize.executeAndBGPsGroups(allBgps);
+    var groupResults = [];
+    for(var g=0; g<groups.length; g++) {
+
+        // Build bushy tree for this group
+        var bgps = groups[g];
+        //console.log("NEW GROUP!!");
+        //console.log(bgps);
+        var costFactor = 1;
+        bgpas = queryEngine.computeCosts(bgps,env);
+
+        //console.log("COMPUTED COSTS:");
+        //console.log(bgps);
+
+        var bestPlans = {};
+        var plans = {};
+        var sizes = {};
+
+        var maxSize = 1;
+        var maxPlan = null;
+
+        var cache = {};
+        
+        sizes['1'] = [];
+
+        // Building plans of size 1
+        for(var i=0; i<bgps.length; i++) {
+            var vars = [];
+            for(var comp in bgps[i]) {
+                if(comp != '_cost') {
+                    if(bgps[i][comp].token === 'var') {
+                        vars.push(bgps[i][comp].value)
+                    } else if(bgps[i][comp].token === 'blank') {
+                        vars.push(bgps[i][comp].label)
+                    }
+                }
+            }
+            //console.log("VARS:");
+            //console.log(vars);
+            plans["_"+i+"_"] = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+            var plan = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+            bestPlans["_"+i+"_"] = plan;
+            delete bgps[i]['_cost'];
+            cache["_"+i+"_"] = true;
+            sizes['1'].push("_"+i+"_");
+            if(maxPlan == null || maxPlan.cost>plan.cost) {
+                maxPlan = plan;
+            }
         }
-    }
-};
 
-QueryPlan.executeEmptyJoinBGP = function(bgp, dataset, queryEngine, queryEnv) {
-    return QueryPlan.executeBGPDatasets(bgp, dataset, queryEngine, queryEnv);
-};
+        //console.log("BEST PLANS");
+        //console.log(bestPlans);
+        
+        // dynamic programming -> build plans of increasing size
+        for(var s=2; s<=bgps.length; s++) { // size
+            //console.log("\n\n\n*********************ITERATION");
+            //console.log(s);
+            for(var sl=1; sl<s; sl++) { // size left plan
+                var sr = s - sl; // size right plan
+                //console.log("SL:"+sl);
+                //console.log("SR:"+sr);
+                var leftPlans = sizes[''+sl] || [];
+                var rightPlans = sizes[''+sr] || [];
+                //console.log("LEFT PLANS");
+                //console.log(leftPlans);
+                //console.log("RIGHT PLANS");
+                //console.log(rightPlans);
+                for(var i=0; i<leftPlans.length; i++) {
+                    for(var j=0; j<rightPlans.length; j++) {
+                        if(leftPlans[i]===rightPlans[j])
+                            continue;
+                        var leftPlan = plans[leftPlans[i]];
+                        var rightPlan = plans[rightPlans[j]];
+                        //console.log("LEFT PLAN");
+                        //console.log(leftPlan);
+                        //console.log("RIGHT PLAN");
+                        //console.log(rightPlan);
+                        //console.log("INTERSECTION");
+                        //console.log(QueryPlanDPSize.intersectionSize(leftPlan, rightPlan));
 
-QueryPlan.executeJoinBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    var bindingsa = QueryPlan.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv);
-    if(bindingsa!=null) {
-        var bindingsb = QueryPlan.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv);
-        if(bindingsb!=null) {
-            return QueryPlan.joinBindings(bindingsa, bindingsb);
-        } else {
-            return null;
+                        // condition (1)
+                        if(QueryPlanDPSize.intersectionSize(leftPlan, rightPlan) == 0) {
+                            // condition (2)
+
+                            //console.log("CONNECTED");
+                            //console.log(QueryPlanDPSize.connected(leftPlan,rightPlan));
+                            if(QueryPlanDPSize.connected(leftPlan,rightPlan)) {
+                                maxSize = s;
+                                var p1 = bestPlans[leftPlan.i];  //QueryPlanDPSize.bestPlan(leftPlan, bestPlans);
+                                var p2 = bestPlans[rightPlan.i]; //QueryPlanDPSize.bestPlan(rightPlan, bestPlans);
+
+                                //console.log("P1");
+                                //console.log(p1);
+                                //console.log("P2");
+                                //console.log(p2);
+                                var currPlan = QueryPlanDPSize.createJoinTree(p1,p2);
+                                if(!cache[currPlan.i]) {
+                                    cache[currPlan.i] = true;
+                                    //console.log("CURR PLAN");
+                                    //console.log(currPlan);
+                                    var costUnion = currPlan.cost+1;
+                                    if(bestPlans[currPlan.i] != null) {
+                                        costUnion = bestPlans[currPlan.i].cost;
+                                    }
+                                    
+                                    var acum = sizes[s] || [];
+                                    acum.push(currPlan.i);
+                                    plans[currPlan.i] = currPlan;
+                                    sizes[s] = acum;
+                                    
+                                    //console.log("COST UNION");
+                                    //console.log(costUnion);
+                                    if(costUnion > currPlan.cost) {
+                                        if(maxSize === s) {
+                                            maxPlan = currPlan;
+                                        }
+                                        bestPlans[currPlan.i] = currPlan;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-    } else {
-        return null;
+
+        //console.log(sizes);
+        
+        //console.log("==== FOUND ===");
+        //console.log(maxPlan);
+        groupResults.push(maxPlan);
     }
+
+
+    // now execute the Bushy trees and perform
+    // cross products between groups
+    var acum = null;
+
+    for(var g=0; g<groupResults.length; g++) {
+        var tree = groupResults[g];
+        var result = QueryPlanDPSize.executeBushyTree(tree, dataset, queryEngine, env);
+        if(acum == null) {
+            acum = result;
+        } else {
+            acum = QueryPlanDPSize.crossProductBindings(acum, result);
+        }
+    };
+
+    return acum;
 };
 
-QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
+// @modified dp
+QueryPlanDPSize.executeEmptyJoinBGP = function(bgp, dataset, queryEngine, queryEnv) {
+    return QueryPlanDPSize.executeBGPDatasets(bgp, dataset, queryEngine, queryEnv);
+};
+
+
+// @mofidified dp
+QueryPlanDPSize.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
     // avoid duplicate queries in the same graph
     // merge of graphs is not guaranted here.
     var duplicates = {};
@@ -36564,11 +37121,11 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
                 duplicates[dataset['default'][i].oid] = true;
                 bgp.graph = dataset['default'][i];//.oid
                 var results = queryEngine.rangeQuery(bgp, queryEnv);
-                results = QueryPlan.buildBindingsFromRange(results, bgp);
+                results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
                 acum.push(results);
             }
         }
-        var acumBindings = QueryPlan.unionManyBindings(acum);
+        var acumBindings = QueryPlanDPSize.unionManyBindings(acum);
         return acumBindings;
     } else if(bgp.graph.token === 'var') {
         // union through all named datasets
@@ -36582,7 +37139,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
                 
                 var results = queryEngine.rangeQuery(bgp, queryEnv);
                 if(results != null) {
-                    results = QueryPlan.buildBindingsFromRange(results, bgp);
+                    results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
                     // add the graph bound variable to the result 
                     for(var j=0; j< results.length; j++) {
                         results[j][graphVar] = dataset.named[i].oid;
@@ -36594,7 +37151,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
             }
         }
         
-        var acumBindings = QueryPlan.unionManyBindings(acum||[]);
+        var acumBindings = QueryPlanDPSize.unionManyBindings(acum||[]);
         return acumBindings;
 
     } else {
@@ -36602,7 +37159,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
         // Filtering the results will still be necessary
         var results = queryEngine.rangeQuery(bgp, queryEnv);
         if(results!=null) {
-            results = QueryPlan.buildBindingsFromRange(results, bgp);
+            results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
             return results;
         } else {
             return null;
@@ -36610,22 +37167,9 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
     }
 };
 
-QueryPlan.executeCrossProductBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    var bindingsa = QueryPlan.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv);
-    if(bindingsa!=null) {
-        var bindingsb = QueryPlan.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv);
-        if(bindingsb!=null) {
-            return QueryPlan.crossProductBindings(bindingsa, bindingsb);
-        } else {
-            return null;
-        }
-    } else {
-        return null;
-    }
-};
-
-QueryPlan.buildBindingsFromRange = function(results, bgp) {
-    var variables = QueryPlan.variablesInBGP(bgp);
+// @used
+QueryPlanDPSize.buildBindingsFromRange = function(results, bgp) {
+    var variables = QueryPlanDPSize.variablesInBGP(bgp);
     var bindings = {};
 
     var components =  bgp.value||bgp;
@@ -36655,41 +37199,9 @@ QueryPlan.buildBindingsFromRange = function(results, bgp) {
     return resultsBindings;
 };
 
-QueryPlan.variablesIntersectionBindings = function(bindingsa, bindingsb) {
-    var ia = 0;
-    var ib = 0;
-    var varsa = [];
-    var varsb = [];
 
-    for(var variable in bindingsa) {
-        varsa.push(variable);
-    }
-
-    for(var variable in bindingsb) {
-        varsb.push(variable);
-    }
-    varsa.sort();
-    varsb.sort();
-
-
-    var intersection = [];
-
-    while(ia<varsa.length && ib<varsb.length) {
-        if(varsa[ia] === varsb[ib]) {
-            intersection.push(varsa[ia]);
-            ia++;
-            ib++;
-        } else if(varsa[ia] < varsb[ib]) {
-            ia++;
-        } else {
-            ib++;
-        }
-    }
-
-    return intersection;
-};
-
-QueryPlan.areCompatibleBindings = function(bindingsa, bindingsb) {
+// @used
+QueryPlanDPSize.areCompatibleBindings = function(bindingsa, bindingsb) {
     for(var variable in bindingsa) {
         if(bindingsb[variable]!=null && (bindingsb[variable] != bindingsa[variable])) {
             return false;
@@ -36700,7 +37212,8 @@ QueryPlan.areCompatibleBindings = function(bindingsa, bindingsb) {
 };
 
 
-QueryPlan.mergeBindings = function(bindingsa, bindingsb) {
+// @used
+QueryPlanDPSize.mergeBindings = function(bindingsa, bindingsb) {
     var merged = {};
     for(var variable in bindingsa) {
         merged[variable] = bindingsa[variable];
@@ -36713,16 +37226,63 @@ QueryPlan.mergeBindings = function(bindingsa, bindingsb) {
     return merged;
 };
 
+QueryPlanDPSize.joinBindings2 = function(bindingVars, bindingsa, bindingsb) {
+    var acum = {};
+    var bindings, variable, variableValue, values, tmp;
+    var joined = [];
 
-QueryPlan.joinBindings = function(bindingsa, bindingsb) {
+    for(var i=0; i<bindingsa.length; i++) {
+        bindings = bindingsa[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+            if(j == bindingVars.length-1) {
+                values = tmp[variableValue] || [];
+                values.push(bindings);
+                tmp[variableValue] = values;
+            } else {
+                values = tmp[variableValue] || {};
+                tmp[variableValue] = values;
+                tmp = values;
+            }
+        }
+    }
+
+    for(var i=0; i<bindingsb.length; i++) {
+        bindings = bindingsb[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+
+            if(tmp[variableValue] != null) {
+                if(j == bindingVars.length-1) {
+                    for(var k=0; k<tmp[variableValue].length; k++) {
+                        joined.push(QueryPlanDPSize.mergeBindings(tmp[variableValue][k],bindings));
+                    }
+                } else {
+                    tmp = tmp[variableValue];
+                }
+            } else {
+                continue;
+            }
+        }
+    }
+
+    return joined;
+};
+
+// @used
+QueryPlanDPSize.joinBindings = function(bindingsa, bindingsb) {
     var result = [];
 
     for(var i=0; i< bindingsa.length; i++) {
         var bindinga = bindingsa[i];
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
-                result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+            if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
+                result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
             }
         }
     }
@@ -36730,7 +37290,8 @@ QueryPlan.joinBindings = function(bindingsa, bindingsb) {
     return result;
 };
 
-QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
+// @used
+QueryPlanDPSize.augmentMissingBindings = function(bindinga, bindingb) {
     for(var pb in bindingb) {
         if(bindinga[pb] == null) {
             bindinga[pb] = null
@@ -36740,7 +37301,7 @@ QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
 };
 
 /*
-  QueryPlan.diff = function(bindingsa, biundingsb) {
+  QueryPlanDPSize.diff = function(bindingsa, biundingsb) {
   var result = [];
 
   for(var i=0; i< bindingsa.length; i++) {
@@ -36748,16 +37309,16 @@ QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
   var matched = false;
   for(var j=0; j<bindingsb.length; j++) {
   var bindingb = bindingsb[j];
-  if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
+  if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
   matched = true;
-  result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+  result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
   }
   }
   if(matched === false) {
   // missing bindings must be present for further processing
   // e.g. filtering by not present value (see DAWG tests
   // bev-6)
-  QueryPlan.augmentMissingBindings(bindinga, bindingb);
+  QueryPlanDPSize.augmentMissingBindings(bindinga, bindingb);
   result.push(bindinga);
   }
   }
@@ -36765,7 +37326,9 @@ QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
   return result;    
   };
 */
-QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
+
+// @used
+QueryPlanDPSize.leftOuterJoinBindings = function(bindingsa, bindingsb) {
     var result = [];
 
     for(var i=0; i< bindingsa.length; i++) {
@@ -36773,9 +37336,9 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
         var matched = false;
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
+            if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
                 matched = true;
-                result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+                result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
             }
         }
         if(matched === false) {
@@ -36783,7 +37346,7 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
             // e.g. filtering by not present value (see DAWG tests
             // bev-6)
             // augmentMissingBindings set their value to null.
-            QueryPlan.augmentMissingBindings(bindinga, bindingb);
+            QueryPlanDPSize.augmentMissingBindings(bindinga, bindingb);
             result.push(bindinga);
         }
     }
@@ -36791,40 +37354,43 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
     return result;
 };
 
-QueryPlan.crossProductBindings = function(bindingsa, bindingsb) {
+// @modified dp
+QueryPlanDPSize.crossProductBindings = function(bindingsa, bindingsb) {
     var result = [];
 
     for(var i=0; i< bindingsa.length; i++) {
         var bindinga = bindingsa[i];
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+            result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
         }
     }
 
     return result;
 };
 
-QueryPlan.unionBindings = function(bindingsa, bindingsb) {
+// @used
+QueryPlanDPSize.unionBindings = function(bindingsa, bindingsb) {
     return bindingsa.concat(bindingsb);
 };
 
-QueryPlan.unionManyBindings = function(bindingLists) {
+// @used
+QueryPlanDPSize.unionManyBindings = function(bindingLists) {
     var acum = [];
     for(var i=0; i<bindingLists.length; i++) {
         var bindings = bindingLists[i];
-        acum = QueryPlan.unionBindings(acum, bindings);
+        acum = QueryPlanDPSize.unionBindings(acum, bindings);
     }
 
     return acum;
 };
 
-// end of ./src/js-query-engine/src/query_plan.js 
+// end of ./src/js-query-engine/src/query_plan_sync_dpsize.js 
 // exports
 var QueryEngine = {};
 
 //imports
-
+var QueryPlan = QueryPlanDPSize;
 QueryEngine.QueryEngine = function(params) {
     if(arguments.length != 0) {
         this.backend = params.backend;
@@ -37137,6 +37703,28 @@ QueryEngine.QueryEngine.prototype.resolveNsInEnvironment = function(prefix, env)
     return namespaces[prefix];
 };
 
+QueryEngine.QueryEngine.prototype.termCost = function(term, env) {
+    if(term.token === 'uri') {
+        var uri = Utils.lexicalFormBaseUri(term, env);
+        if(uri == null) {
+            return(0);
+        } else {
+            return(this.lexicon.resolveUriCost(uri));
+        }
+
+    } else if(term.token === 'literal') {
+        var lexicalFormLiteral = Utils.lexicalFormLiteral(term, env);
+        return(this.lexicon.resolveLiteralCost(lexicalFormLiteral));
+    } else if(term.token === 'blank') {
+        var label = term.label;
+        return this.lexicon.resolveBlankCost(label);
+    } else if(term.token === 'var') {
+        return (this.lexicon.oidCounter/3)
+    } else {
+          return(null);
+    }
+    
+};
 
 QueryEngine.QueryEngine.prototype.normalizeTerm = function(term, env, shouldIndex) {
     if(term.token === 'uri') {
@@ -37247,6 +37835,26 @@ QueryEngine.QueryEngine.prototype.normalizeQuad = function(quad, queryEnv, shoul
             predicate:predicate, 
             object:object, 
             graph:graph});
+};
+
+QueryEngine.QueryEngine.prototype.quadCost = function(quad, queryEnv, shouldIndex) {
+    var subject    = null;
+    var predicate  = null;
+    var object     = null;
+    var graph      = null;
+    var oid;
+
+    if(quad.graph == null) {
+        graph = (this.lexicon.oidCounter/4)
+    } else {
+        graph = this.termCost(quad.graph, queryEnv)
+    }
+
+    subject = this.termCost(quad.subject, queryEnv);
+    predicate = this.termCost(quad.predicate, queryEnv);
+    object = this.termCost(quad.object, queryEnv);
+
+    return(graph+subject+predicate+object);
 };
 
 QueryEngine.QueryEngine.prototype.denormalizeBindingsList = function(bindingsList, envOut) {
@@ -37427,12 +38035,12 @@ QueryEngine.QueryEngine.prototype.executeQuery = function(syntaxTree, callback, 
                                 for(var p=0; p<components.length; p++) {
                                     var component = components[p];
                                     if(tripleTemplate[component].token === 'blank') {
-                                        if(blankMap[tripleTemplate[component].value] != null) {
-                                            tripleTemplate[component].value = blankMap[tripleTemplate[component].value];
+                                        if(blankMap[tripleTemplate[component].label] != null) {
+                                            tripleTemplate[component].value = blankMap[tripleTemplate[component].label];
                                         } else {
                                             var blankId = "_:b"+blankIdCounter;
                                             blankIdCounter++;
-                                            blankMap[tripleTemplate[component].value] = blankId;
+                                            blankMap[tripleTemplate[component].label] = blankId;
                                             tripleTemplate[component].value = blankId;
                                         }
                                     }
@@ -37527,12 +38135,10 @@ QueryEngine.QueryEngine.prototype.executeSelect = function(unit, env, defaultDat
                 }
                 
             } else { // fail selectUnit
-                console.log("ERROR selectUnit");
                 callback(false, result);
             }
         } else { // fail  normalizaing datasets
-            console.log("ERROR normalizing");
-            callback(false,results);
+            callback(false,"Error normalizing datasets");
         }
     } else {
         callback(false,"Cannot execute " + unit.kind + " query as a select query");
@@ -37717,7 +38323,7 @@ QueryEngine.QueryEngine.prototype.executeUNION = function(projection, dataset, p
 
 QueryEngine.QueryEngine.prototype.executeAndBGP = function(projection, dataset, patterns, env) {
     var that = this;
-    var result = QueryPlan.executeAndBGPs(patterns.value, dataset, this, env);
+    var result = QueryPlan.executeAndBGPsDPSize(patterns.value, dataset, this, env);
     if(result!=null) {
         return QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
     } else {
@@ -37835,7 +38441,6 @@ QueryEngine.QueryEngine.prototype.executeJOIN = function(projection, dataset, pa
     }
 
     var result = QueryPlan.joinBindings(set1, set2);
-
     result = QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
     return result;
 };
@@ -37907,6 +38512,7 @@ QueryEngine.QueryEngine.prototype.executeUpdate = function(syntaxTree, callback)
                 if(success == false) {
                     console.log("Error loading graph");
                     console.log(result);
+                    callback(false, "error batch loading quads");
                 } else {
                     var result = that.batchLoad(result);
                     callback(result!=null, result||"error batch loading quads");
@@ -38010,15 +38616,18 @@ QueryEngine.QueryEngine.prototype.batchLoad = function(quads, callback) {
         originalQuad = quad;
         quad = {subject: subject, predicate:predicate, object:object, graph: graph};
         key = new QuadIndexCommon.NodeKey(quad);
-          
-        var result = this.backend.index(key)
-        if(result == true){
-            if(this.eventsOnBatchLoad)
-                this.callbacksBackend.nextGraphModification(Callbacks.added, [originalQuad,quad]);
-            counter = counter + 1;
-        } else {
-            success = false;
-            break;
+
+        var result = this.backend.search(key);
+        if(!result) {
+            result = this.backend.index(key)
+            if(result == true){
+                if(this.eventsOnBatchLoad)
+                    this.callbacksBackend.nextGraphModification(Callbacks.added, [originalQuad,quad]);
+                counter = counter + 1;
+            } else {
+                success = false;
+                break;
+            }
         }
 
     }
@@ -38047,6 +38656,15 @@ QueryEngine.QueryEngine.prototype.batchLoad = function(quads, callback) {
         return null;
     }
 };
+
+// @modified dp
+QueryEngine.QueryEngine.prototype.computeCosts = function(quads, env) {
+    for(var i=0; i<quads.length; i++) {
+        quads[i]['_cost'] = this.quadCost(quads[i],env);
+    }
+
+    return quads;
+}
 
 // Low level operations for update queries
 
@@ -38538,7 +39156,6 @@ Callbacks.CallbacksBackend.prototype._tokenizeComponents = function(s, p, o, g) 
         pattern['subject'] = Callbacks.ANYTHING;
     } else {
         if(s.indexOf("_:") == 0) {
-            console.log("BLANK!!");
             pattern['subject'] = {'token': 'blank', 'value':s};
         } else {
             pattern['subject'] = {'token': 'uri', 'value':s};
@@ -38789,10 +39406,11 @@ Callbacks.CallbacksBackend.prototype.dispatchQueries = function(callback) {
 // exports
 var RDFStoreClient = {};
 
+
 try {
-    console.log("*** Checking if web workers are available");
-    Worker;
-    console.log("*** Web workers available");
+    if(typeof(Worker)=='undefined') {
+        Worker = null;
+    };
 } catch(e) {
     Worker = null;
 }
@@ -38801,7 +39419,7 @@ try {
 if(!!Worker) {
 
     RDFStoreClient.RDFStoreClient = function(path_to_store_script, args, cb) {
-        //console.log("trying to load "+path_to_store_script);
+        console.log("trying to load "+path_to_store_script);
         if(Worker.Worker) {
             this.connection = new Worker.Worker(path_to_store_script);
         } else {
@@ -38819,7 +39437,8 @@ if(!!Worker) {
 
         this.rdf = RDFJSInterface.rdf;
 
-        //console.log("The worker");
+        console.log("The worker");
+        console.log(this.connection);
         var that = this;
         this.connection.onmessage = function(event){
             that.receive(event);
@@ -38832,21 +39451,30 @@ if(!!Worker) {
     RDFStoreClient.RDFStoreClient.prototype.receive = function(packet) {
         event = packet.data || packet;
         //console.log("RECEIVED SOMETHING");
-        var callbackData = this.callbacks[event.callback];
-        //console.log(packet);
-        //console.log(callbackData);
-        if(callbackData) {
-            if(callbackData.fn === 'create' || callbackData.fn === 'execute' || callbackData.fn === 'insert' || callbackData.fn == 'graph' ||
-               callbackData.fn === 'node' || callbackData.fn === 'insert' || callbackData.fn === 'delete' || callbackData.fn === 'clear' ||
-               callbackData.fn === 'load' || callbackData.fn === 'startObservingQueryEndCb' || callbackData.fn === 'registeredGraphs') {
-                delete this.callbacks[event.callback];
-                callbackData.cb(event.success, event.result);
-            } else if(callbackData.fn === 'startObservingQuery') {
-                callbackData.cb(event.result);                
-            } else if(callbackData.fn === 'startObservingNode') {
-                callbackData.cb(event.result);
-            } else if(callbackData.fn === 'subscribe') {
-                callbackData.cb(event.event, event.result);
+        if(event.fn === 'workerRequest:NetworkTransport:load') {
+            var that = this;
+            var workerCallback = event['callback'];
+            var args = event['arguments'].concat(function(success, results){
+                that.connection.postMessage({'fn':'workerRequestResponse', 'results':[success, results], 'callback':workerCallback});
+            });
+            NetworkTransport.load.apply(NetworkTransport,args);
+        } else {
+            var callbackData = this.callbacks[event.callback];
+            //console.log(packet);
+            //console.log(callbackData);
+            if(callbackData) {
+                if(callbackData.fn === 'create' || callbackData.fn === 'execute' || callbackData.fn === 'insert' || callbackData.fn == 'graph' ||
+                   callbackData.fn === 'node' || callbackData.fn === 'insert' || callbackData.fn === 'delete' || callbackData.fn === 'clear' ||
+                   callbackData.fn === 'load' || callbackData.fn === 'startObservingQueryEndCb' || callbackData.fn === 'registeredGraphs') {
+                    delete this.callbacks[event.callback];
+                    callbackData.cb(event.success, event.result);
+                } else if(callbackData.fn === 'startObservingQuery') {
+                    callbackData.cb(event.result);                
+                } else if(callbackData.fn === 'startObservingNode') {
+                    callbackData.cb(event.result);
+                } else if(callbackData.fn === 'subscribe') {
+                    callbackData.cb(event.event, event.result);
+                }
             }
         }
     };
@@ -39238,19 +39866,38 @@ if(!!Worker) {
 // exports
 var Store = {};
 
-// imports
+/**
+ * @namespace
+ * 
+ * The Store module defines the public interface to the RDF store.
+ */
 
-Store.VERSION = "0.4.9";
+// imports
+var MongodbQueryEngine = { MongodbQueryEngine: function(){ throw 'MongoDB backend not supported in the browser version' } };
 
 /**
- * Tries to create a new RDFStore instance that will be
- * executed in a web worker.
+ * Version of the store
+ */
+Store.VERSION = "0.5.3";
+
+/**
+ * Create a new RDFStore instance that will be
+ * executed in a web worker in the browser or a new process
+ * in Node.js.
+ * <br/>
+ * <br/>
  * The first argument to this function is the URL/FS location 
- * of the store script. 
+ * of the store script.
+ * <br/>
+ * <br/>
  * This parameter is mandatory in the browser. It is safe to
  * ignore this parameter in Node.js.
+ * <br/>
+ * <br/>
  * If support for web workers is not present, a regular
  * store object will be initialized and returned.
+ * <br/>
+ * <br/>
  *
  * @param {String} [scriptPath] URL of the RDFStore script
  * @param {Object[]} [args] Arguments to be passed to the store that will be created
@@ -39261,7 +39908,7 @@ Store.connect = function() {
     if(arguments.length == 1) {
         path = __dirname;
         args = {};
-        callback = arguments[0]
+        callback = arguments[0];
     } if(arguments.length == 2) {
         if(typeof(arguments[0]) === 'string') {
             path = arguments[0];
@@ -39287,13 +39934,31 @@ Store.connect = function() {
             });
         }
     } catch(e) {
-        console.log(e)
         Store.create(args,function(connection){
             callback(false, connection);
         });        
     }
 };
 
+/**
+ * Creates a new instance of the store.
+ *
+ * The function accepts two optional arguments.
+ * <br/>
+ * If only one argument is passed it must be a
+ * callback function that will be invoked when the
+ * store had been created.<br/>
+ * <br/>
+ * If two arguments are passed the first one must
+ * be a map of configuration parameters for the
+ * store, and the second one the callback function.<br/>
+ * <br/>
+ * Take a look at the Store constructor function for
+ * a detailed list of possible configuration parameters.<br/>
+ *
+ * @param {Object[]} [args] Arguments to be passed to the store that will be created
+ * @param {Function} [callback] Callback function that will be invoked with an error flag and the connection/store object.
+ */
 Store.create = function(){
     if(arguments.length == 1) {
         return new Store.Store(arguments[0]);
@@ -39305,13 +39970,25 @@ Store.create = function(){
 };
 
 /**
- * Creates a new store.
+ * Creates a new store.<br/>
+ * <br/>
+ * It accepts two optional arguments, a map of configuration
+ * options for the store and a callback function.<br/>
  *
+ * @constructor 
  * @param {Function} [callback] Callback that will be invoked when the store has been created
  * @param {Object} [params]
- *  - persistent:  should use persistence?
- *  - name: if using persistence, the name for this store
- *  - maxCacheSize: if using persistence, maximum size of the index cache
+ * <ul>
+ *  <li> persistent:  should the store use persistence? </li>
+ *  <li> treeOrder: in versions of the store backed by the native indexing system, the order of the BTree indices</li>
+ *  <li> name: when using persistence, the name for this store. In the MongoDB backed version, name of the DB used by the store. By default <code>'rdfstore_js'</code> is used</li>
+ *  <li> overwrite: clears the persistent storage </li>
+ *  <li> maxCacheSize: if using persistence, maximum size of the index cache </li>
+ *  <li> engine: the persistent storage to use, a value <code>mongodb</code> selects the MongoDB engine</li>
+ *  <li> mongoDomain: when <code>engine=mongodb</code>, server domain name or IP address where the MongoDB server backing the store is running. By default <code>'127.0.0.1'</code> is used</li>
+ *  <li> mongoPort: when <code>engine=mongodb</code>, port where the MongoDB server is running. By default <code>27017</code> is used</li>
+ *  <li> mongoOptions: when <code>engine=mongodb</code>, additional options for the MongoDB driver. By default <code>{}</code> is used</li>
+ * </ul>
  */
 Store.Store = function(arg1, arg2) {
     var callback = null;
@@ -39333,51 +40010,76 @@ Store.Store = function(arg1, arg2) {
         params['treeOrder'] = 15;
     }
 
-    this.rdf = RDFJSInterface.rdf;
     this.functionMap = {};
 
     var that = this;
-    new Lexicon.Lexicon(function(lexicon){
-        if(params['overwrite'] === true) {
-            // delete lexicon values
-            lexicon.clear();
-        }
-        new QuadBackend.QuadBackend(params, function(backend){
+    if(params['engine']==='mongodb') {
+        this.isMongodb = true;
+        this.engine = new MongodbQueryEngine.MongodbQueryEngine(params);
+        this.engine.readConfiguration(function(){
             if(params['overwrite'] === true) {
-                // delete index values
-                backend.clear();
-            }
-            params.backend = backend;
-            params.lexicon =lexicon;
-            that.engine = new QueryEngine.QueryEngine(params);      
-            if(callback) {
+                that.engine.clean(function(){
+                    callback(that);
+                });
+            } else {
                 callback(that);
             }
-        })
-    },
-    params['name']);
+        });
+    } else {
+        new Lexicon.Lexicon(function(lexicon){
+            if(params['overwrite'] === true) {
+                // delete lexicon values
+                lexicon.clear();
+            }
+            new QuadBackend.QuadBackend(params, function(backend){
+                if(params['overwrite'] === true) {
+                    // delete index values
+                    backend.clear();
+                }
+                params.backend = backend;
+                params.lexicon =lexicon;
+                that.engine = new QueryEngine.QueryEngine(params);      
+                if(callback) {
+                    callback(that);
+                }
+            });
+        },params['name']);
+    }
 };
 
 
 /**
- * Executes a query in the store.
- * There are two possible way of invoking this function,
+ * An instance of RDF JS Interface <code>RDFEnvironment</code>
+ * associated to this graph instance.
+ */
+Store.Store.prototype.rdf = RDFJSInterface.rdf;
+
+/**
+ * Executes a query in the store.<br/>
+ * <br/>
+ * There are two possible ways of invoking this function,
  * providing a pair of arrays of namespaces that will be
  * used to compute the union of the default and named
  * dataset, or without them.
+ * <br/>
+ * <br/>
  * Both invocations receive as an optional last parameter
  * a callback function that will receive the return status
  * of the query and the results.
- *
- * @arguments:
- * 1)
+ * <br/>
+ * <br/>
+ * Results can have different formats:
+ * <ul>
+ *  <li> SELECT queries: array of binding maps </li>
+ *  <li> CONSTRUCT queries: RDF JS Interface Graph object </li>
+ *  <li> ASK queries: JS boolean value </li>
+ *  <li> LOAD/INSERT... queries: Number of triples modified/inserted </li>
+ * </ul>
+ *  
+ * @arguments: 
  * @param {String} query
- * @param {Function} [callback]
- * 
- * 2)
- * @param {String} query
- * @param {String} URIs default namespaces
- * @param {String} URIs named namespaces
+ * @param {String} [defaultURIs] default namespaces
+ * @param {String} [namespacesURIs] named namespaces
  * @param {Function} [callback]
  */
 Store.Store.prototype.execute = function() {
@@ -39397,7 +40099,7 @@ Store.Store.prototype.execute = function() {
      
         if(arguments.length === 1) {
             queryString = arguments[0];
-            callback = function(){};
+            var callback = function(){};
         } else if(arguments.length === 2) {
             queryString = arguments[0];
             callback = arguments [1];
@@ -39406,26 +40108,59 @@ Store.Store.prototype.execute = function() {
     }
 };
 
+/**
+ * A variation of the execute function that expects 
+ * arguments containing values for the default and named 
+ * graphs that will be used in the query.
+ *
+ *
+ * @arguments:
+ * @param {String} query
+ * @param {String} URIs default namespaces
+ * @param {String} URIs named namespaces
+ * @param {Function} [callback]
+ */
 Store.Store.prototype.executeWithEnvironment = function() {
-    var queryString;
-    var callback;
-    var defaultGraphs;
-    var namedGraphs;
+    var queryString, defaultGraphs, namedGraphs;
 
     if(arguments.length === 3) {
         queryString   = arguments[0];
-        callback      = function(){};
+        // JSDoc fails if this is pushed outside 
+        var callback  = function(){};
         defaultGraphs = arguments[1];
         namedGraphs   = arguments[2];
     } else if(arguments.length === 4) {
         queryString   = arguments[0];
-        callback      = arguments [3];
+        var callback      = arguments [3];
         defaultGraphs = arguments[1];
         namedGraphs   = arguments[2];
     }
-    this.engine.execute(queryString, callback, defaultGraphs, namedGraphs);
+    var defaultGraphsNorm = [];
+    var namedGraphsNorm = [];
+    for(var i=0; i<defaultGraphs.length; i++) {
+        defaultGraphsNorm.push({'token':'uri','value':defaultGraphs[i]})
+    }
+    for(var i=0; i<namedGraphs.length; i++) {
+        namedGraphsNorm.push({'token':'uri','value':namedGraphs[i]})
+    }
+    this.engine.execute(queryString, callback, defaultGraphsNorm, namedGraphsNorm);
 };
 
+/**
+ * Retrieves all the quads belonging to a certain graph
+ * in the store as a RDF JS Interface Graph object.<br/>
+ * <br/>
+ * The function accepts as mandatory parameter a callback
+ * function that will receive the returned graph.<br/>
+ * <br/>
+ * Optionally, the URI of the graph can also be passed as
+ * the first argument. If no graph is specified, the
+ * default graph will be returned.<br/>
+ *
+ * @arguments
+ * @param {String} [graphURI] If this parameter is missing, the default graph will be returned
+ * @param {Functon} callback
+ */
 Store.Store.prototype.graph = function() {
     var graphUri = null;
     var callback = null;
@@ -39446,9 +40181,28 @@ Store.Store.prototype.graph = function() {
     this.engine.execute("CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + graphUri + "> { ?s ?p ?o } }", callback);
 };
 
-
+/**
+ * Retrieves all the quads belonging to a certain node
+ * in the store as a RDF JS Interface Graph object containing
+ * the collection of triples whose subject is the provided
+ * node URI.<br/>
+ * <br/>
+ * The function accepts as mandatory parameters the node URI and 
+ * a callback unction that will receive the returned node.<br/>
+ * <br/>
+ * Optionally, the URI of the graph where the node is contained 
+ * can also be passed as the first argument. <br/>
+ * <br/>
+ * If no graph is specified, the node will be looked into the 
+ * default graph.<br/>
+ *
+ * @arguments
+ * @param {String} nodeURI URI of the node to look for
+ * @param {String} [graphURI] If this parameter is missing, the node will be looked into the default graph
+ * @param {Functon} callback
+ */
 Store.Store.prototype.node = function() {
-     var graphUri = null;
+    var graphUri = null;
     var callback = null;
     var nodeUri  = null;
     if(arguments.length === 2) {
@@ -39460,7 +40214,7 @@ Store.Store.prototype.node = function() {
         graphUri = arguments[1];
         callback = arguments[2] || function(){};
     } else {
-        throw("An optional graph URI and a callback function must be provided");
+        throw("An optional graph URI, node URI and a callback function must be provided");
     }
 
     if(this.rdf.resolve(graphUri) != null) {
@@ -39474,6 +40228,30 @@ Store.Store.prototype.node = function() {
     this.engine.execute("CONSTRUCT { <" + nodeUri + "> ?p ?o } WHERE { GRAPH <" + graphUri + "> { <" + nodeUri + "> ?p ?o } }", callback);
 };
 
+/**
+ * Associates an event listener function to a node URI. Every time the collection
+ * of triples whose subject is the specified node URI changes, because an
+ * insertion or deletion, the provided callback function will be invoked
+ * receiving as a parameter a RDF JS Interface Graph object with the new
+ * collection of triples.<br/>
+ * <br/>
+ * The function accepts two mandatory arguments, the URI of the node to observe
+ * and the function that will receive the event notifications. An optional
+ * third parameter, consisting of a callback function, can be passed and will be invoked
+ * once the store had correctly configured the event listener.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the *setBatchLoadEvents* function with a true argument.<br/>
+ *<br/>
+ * The event listener function can be removed using the stopObservingNode function.
+ *
+ * @arguments
+ * @param {String} nodeURI URI of the node to observe
+ * @param {Function} eventListener Function that will be notified with the events
+ * @param {Function} [callback] Function that will be invoked, once the event listener had been correctly set up.
+ */
 Store.Store.prototype.startObservingNode = function() {
     var uri, graphUri, callback;
 
@@ -39489,10 +40267,38 @@ Store.Store.prototype.startObservingNode = function() {
     }
 };
 
+/**
+ * Removes a callback function associated to a node.<br/>
+ * The event listener function object must be passed as an argument.<br/>
+ *
+ * @arguments
+ * @param {Function} eventListener The event listener function to remove, the same passed as an argument to startObservingNode
+ */
 Store.Store.prototype.stopObservingNode = function(callback) {
     this.engine.callbacksBackend.stopObservingNode(callback);
 };
 
+/**
+ * Associates an event listener function to a SPARQL SELECT or
+ * CONSTRUCT query.<br/>
+ * Every time an update (insert, delete...) query modified the 
+ * triples in the store in a way that modifies the output of the
+ * query, the event listener will be invoked with an updated 
+ * result.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the <code>setBatchLoadEvents</code> function with a true argument.<br/>
+ *<br/>
+ * The event listener function can be removed invoking the
+ * <code>stopObservingQuery</code> function. 
+ *
+ * @arguments
+ * @param {String} query SELECT or CONSTRUCT SPARQL query
+ * @param {Function} eventListener the function that will receive the notifications
+ * @param {Function} [callback] optional function that will be invoked when the stored had set up the event listener function.
+ */
 Store.Store.prototype.startObservingQuery = function() {
     var query = arguments[0];
     var callback = arguments[1];
@@ -39504,10 +40310,40 @@ Store.Store.prototype.startObservingQuery = function() {
     }
 };
 
+/**
+ * Removes a callback function associated to a SPARQL query.<br/>
+ * The event listener function object must be passed as an argument.
+ *
+ * @arguments
+ * @param {Function} eventListener The event listener function to remove, the same passed as an argument to startObservingQuery
+ */
 Store.Store.prototype.stopObservingQuery = function(query) {
     this.engine.callbacksBackend.stopObservingQuery(query);
 };
 
+/**
+ * Associates an event listener to a pattern expressed as the
+ * subject, predicate, object and graph string parameters passed
+ * to the function. To match any value in that position, a <code>null</code>
+ * value can be passed as an argument. e.g. <code>subscribe(null, null, null, g, cb)</code>,
+ * will be notified with any change in the g graph.<br/>
+ * The graph component of the pattern does not support a <code>null</code> value.<br/>
+ *<br/>
+ * Results will be notified as an Array of RDF JS Interface
+ * <code>Triple</code> objects.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the <code>setBatchLoadEvents</code> function with a true argument.
+ *
+ * @arguments
+ * @param {String} s subject or null for any subject
+ * @param {String} p predicate or null for any predicate
+ * @param {String} o object or null for any object
+ * @param {String} g graph or null for any graph
+ * @param {Function} event listener function that will be notified when a change occurs
+ */
 Store.Store.prototype.subscribe = function(s, p, o, g, callback) {
     var adapterCb = function(event,triples){
         var acum = [];
@@ -39526,26 +40362,68 @@ Store.Store.prototype.subscribe = function(s, p, o, g, callback) {
         }
 
         callback(event,acum);
-    }
+    };
 
     this.functionMap[callback] = adapterCb;
     this.engine.callbacksBackend.subscribe(s,p,o,g,adapterCb,function(){});
 };
 
+/**
+ * Removes an event listener associated to a certain pattern.
+ * The function passed as an argument to <code>subscribe</code> must be 
+ * passed as an argument.
+ *
+ * @arguments
+ * @param {Function} callback The event listener to be removed
+ */
 Store.Store.prototype.unsubscribe = function(callback) {
     var adapterCb = this.functionMap[callback];
     this.engine.callbacksBackend.unsubscribe(adapterCb);
     delete this.functionMap[callback];
 };
 
+/**
+ * Register a combination of prefix and URI fragment in the default instance
+ * of the RDF JS Interface API <code>RDFEnvironment</code> object associated
+ * to the store and available through the <code>storeInstance.rdf</code> property.
+ *
+ * @arguments
+ * @param {String} prefix The prefix to be associated
+ * @param {String} URIFragment URI fragment the provided prefix will be resolved
+ */
 Store.Store.prototype.setPrefix = function(prefix, uri) {
-    this.rdf.setPrefix(prefix, uri)
+    this.rdf.setPrefix(prefix, uri);
 };
 
+/**
+ * Defines the URI that will be used by default by the RDF JS Interface
+ * API <code>RDFEnvironment</code> object associated to the store and available
+ * through the <code>storeInstance.rdf</code> property.
+ *
+ * @arguments
+ * @param {String} URIFragment The URI fragment will be used by default
+ */
 Store.Store.prototype.setDefaultPrefix = function(uri) {
-    this.rdf.setDefaultPrefix(uri)
+    this.rdf.setDefaultPrefix(uri);
 };
 
+/**
+ * Inserts a RDF JS Interface API <code>Graph</code> object into the store.
+ * The function receives a mandatory <code>Graph</code> object whose triples
+ * will be inserted. Optionally, a URI string for a graph and a 
+ * callback function can be passed as arguments.<br/>
+ * <br/>
+ * If no graph URI is specified, triples will be inserted into the
+ * default graph.<br/>
+ * <br/>
+ * If the callback function is specified, it will be invoked when all the
+ * triples had been inserted into the store.<br/>
+ *
+ * @arguments
+ * @param {RDFJSInterface.Graph} triples a RDF JS Interface <code>Graph</code> object
+ * @param {String} [graphURI] URI of the graph where the triples will be inserted. If it is missing, triples will be inserted in the default graph
+ * @param {String} [callback] A callback function that will be invoked with a success notification and the number of triples inserted
+ */ 
 Store.Store.prototype.insert = function() {
     var graph;
     var triples;
@@ -39599,6 +40477,23 @@ Store.Store.prototype._nodeToQuery = function(term) {
     }
 };
 
+/**
+ * Removes the triples in a RDF JS Interface API <code>Graph</code> object from the store.
+ * The function receives a mandatory <code>Graph</code> object whose triples
+ * will be removed. Optionally, a URI string for a graph and a 
+ * callback function can be passed as arguments.<br/>
+ * <br/>
+ * If no graph URI is specified, triples will be removed from the
+ * default graph.<br/>
+ * <br/>
+ * If the callback function is specified, it will be invoked when all the
+ * triples had been removed from the store.
+ *
+ * @arguments
+ * @param {RDFJSInterface.Graph} triples a RDF JS Interface <code>Graph</code> object
+ * @param {String} [graphURI] URI of the graph where the triples will be removed from. If it is missing, triples will be removed from the default graph
+ * @param {String} [callback] A callback function that will be invoked with a success notification
+ */ 
 Store.Store.prototype['delete'] = function() {
 
     var graph;
@@ -39633,11 +40528,27 @@ Store.Store.prototype['delete'] = function() {
     this.engine.execute(query, callback);
 };
 
+/** 
+ * Removes all the triples stored in a graph.
+ * 
+ * The URI of the graph and a callback function can be
+ * optinally passed as parameters.<br/>
+ * <br/>
+ * If no graph URI is specified, all triples in the 
+ * default graph will be removed.
+ *
+ * @arguments
+ * @param {String} [graph] the URI of the graph the triples must be removed from
+ * @param {Function} [callback] a function that will be invoked with a success notification
+ */
 Store.Store.prototype.clear = function() {
     var graph;
     var callback;
 
-    if(arguments.length === 1) {
+    if(arguments.length === 0) {
+        graph = this.rdf.createNamedNode(this.engine.lexicon.defaultGraphUri);
+        var callback= function(){};
+    } else if(arguments.length === 1) {
         graph = this.rdf.createNamedNode(this.engine.lexicon.defaultGraphUri);
         callback= arguments[0] || function(){};
     } else if(arguments.length === 2) {
@@ -39653,8 +40564,11 @@ Store.Store.prototype.clear = function() {
 
 /**
  * Boolean value determining if loading RDF must produce
- * triple add events and fire callbacks.
- * Default is false.
+ * triple add events and fire callbacks.<br/>
+ * Default value is false.
+ *
+ * @arguments
+ * @param {boolean} mustFireEvents true/false value.
  */
 Store.Store.prototype.setBatchLoadEvents = function(mustFireEvents){
     this.engine.eventsOnBatchLoad = mustFireEvents;
@@ -39662,7 +40576,14 @@ Store.Store.prototype.setBatchLoadEvents = function(mustFireEvents){
 
 /**
  * Registers a namespace prefix that will be automatically declared
- * in all the queries
+ * in all the queries.<br/>
+ * <br/>
+ * The prefix will also be inserte in the default <code>RDFEnvironment</code> object
+ * associated to the <code>rdf</code> property of the store instance.
+ *
+ * @arguments
+ * @param {String} ns the name space to be regsitered
+ * @param {String} prefix the URI fragment associated to the name space
  */
 Store.Store.prototype.registerDefaultNamespace = function(ns, prefix) {
     this.rdf.prefixes.set(ns,prefix);
@@ -39680,6 +40601,31 @@ Store.Store.prototype.registerDefaultProfileNamespaces = function() {
     }
 };
 
+/**
+ * Load triples into a graph in the store. Data can be passed directly to the method
+ * or a remote URI speifying where the data is located can be used.<br/>
+ *<br/>
+ * If the data is passed directly to the load function, the media type stating the format
+ * of the data must also be passed to the function.<br/>
+ *<br/>
+ * If an URI is passed as a parameter, the store will attempt to perform content negotiation
+ * with the remote server and get a representation for the RDF data matching one of the
+ * the RDF parsers registered in the store. In this case, the media type parameter must be
+ * set to the <code>'remote'</code> value.<br/>
+ *<br/>
+ * An additional URI for the graph where the parsed data will be loaded and a callback function
+ * can be also passed as parameters. If no graph is specified, triples will be loaded in the
+ * default graph.<br/>
+ *<br/>
+ * By default loading data will not trigger notification through the events API. If events needs to
+ * be trigger, the functio <code>setBatchLoadEvents</code> must be invoked with a true parameter.
+ *
+ * @arguments
+ * @param {String} mediaType Media type (application/json, text/n3...) of the data to be parsed or the value <code>'remote'</code> if a URI for the data is passed instead
+ * @param {String} data RDF data to be parsed and loaded or an URI where the data will be retrieved after performing content negotiation
+ * @param {String} [graph] Graph where the parsed triples will be inserted. If it is not specified, triples will be loaded in the default graph
+ * @param {Function} callback that will be invoked with a success notification and the number of triples loaded.
+ */
 Store.Store.prototype.load = function(){
     var mediaType;
     var data;
@@ -39733,6 +40679,30 @@ Store.Store.prototype.load = function(){
     }
 };
 
+/**
+ * Registers a new parser associated to the provided media type. If there is a parser already registered for
+ * that media type, the new parser will replace the old one.<br/>
+ *<br/>
+ * Parsers must implement a function *parse* accepting the data to be parsed as the
+ * first parameter and the destination graph URI as the second one.
+ * They must return an array of objects with properties: 'subject', 'predicate', 'object'
+ * and 'graph' containing lexical representations for these values: 
+ *<br/>
+ *<ul>
+ * <li><code>{literal: '"literal"'}</code></li>
+ * <li><code>{literal: ''"literal"^^<datatype>'}</code></li>
+ * <li><code>{literal: '"literal"@lang'}</code></li>
+ * <li><code>{uri: 'uri'}</code></li>
+ * <li><code>{blank: '_:label'}</code></li>
+ *</ul>
+ *<br/>
+ * The provided media type will be used to perform content negotiation when dealing with remote
+ * resources, or to select the parser in the <code>load</code> function.
+ *
+ * @arguments
+ * @param {String} mediaType the media type for this parser
+ * @param {String} parser an object containing the *parse* function with the parser logic
+ */
 Store.Store.prototype.registerParser = function(mediaType, parser) {
     this.engine.rdfLoader.registerParser(mediaType,parser);
 };
@@ -39740,19 +40710,36 @@ Store.Store.prototype.registerParser = function(mediaType, parser) {
 /**
  * Returns the URI of all the graphs currently contained
  * in the store
+ *
+ * @arguments:
+ * @param {Function} callback function that will receive a success notification and the array of graph URIs
  */
 Store.Store.prototype.registeredGraphs = function(callback) {
-    var graphs = this.engine.lexicon.registeredGraphs(true);
-    var acum = [];
-    for(var i=0; i<graphs.length; i++) {
-        var graph = graphs[i];
-        var uri = new RDFJSInterface.NamedNode(graph);
-        acum.push(uri);
+    if(this.isMongodb) {
+        this.engine.registeredGraphs(true, function(graphs){
+            var acum = [];
+            for(var i=0; i<graphs.length; i++) {
+                var graph = graphs[i];
+                var uri = new RDFJSInterface.NamedNode(graph);
+                acum.push(uri);
+            }
+            
+            return callback(true, acum);    
+        });
+    } else {
+        var graphs = this.engine.lexicon.registeredGraphs(true);
+        var acum = [];
+        for(var i=0; i<graphs.length; i++) {
+            var graph = graphs[i];
+            var uri = new RDFJSInterface.NamedNode(graph);
+            acum.push(uri);
+        }
+     
+        return callback(true, acum);    
     }
-
-    return callback(true, acum);    
 };
 
+/** @private */
 Store.Store.prototype._nodeToQuery = function(term) {
     if(term.interfaceName === 'NamedNode') {
         var resolvedUri = this.rdf.resolve(term.valueOf());
@@ -39771,13 +40758,32 @@ Store.Store.prototype._nodeToQuery = function(term) {
 /**
  * Returns the current network transport being used by the
  * the store.
+ * 
+ * The default transport uses TCP sockets in the Node.js version
+ * and relies on jQuery in the browser version. This can be overriden
+ * using the <code>setNetworkTransport</code> function.
  */
 Store.Store.prototype.getNetworkTransport = function() {
     return NetworkTransport;
 };
 
 /**
- * Sets the network transport used by the store;
+ * Sets the network transport used by the store.<br/>
+ * <br/>
+ * Network transport consist of an object implementing the <code>load</code>
+ * function, receiving the URI to load, a string with the value
+ * of the HTTP 'Accept' header for the store registered parsers,
+ * a callback function where the retrieved data and the success notification
+ * must be returned.<br/>
+ *<br/>
+ * Different examples with implementations of different transports can be found
+ * in the source code of the store:
+ *<ul>
+ * <li>src/js-communication/src/tcp_transport.js</li>
+ * <li>src/js-communication/src/ajax_transport.js</li>
+ *</ul>
+ * @arguments
+ * @param networkTransportImpl object implementing the transport *load* function.
  */
 Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
     NetworkTransport = networkTransportImpl;
@@ -39785,12 +40791,37 @@ Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
 
 // end of ./src/js-store/src/store.js 
 // imports
-
     RDFStoreWorker = {};
 
     RDFStoreWorker.observingCallbacks = {};
+    
+    RDFStoreWorker.workerCallbacksCounter = 0;
+    RDFStoreWorker.workerCallbacks = {};
+    RDFStoreWorker.registerCallback = function(cb) {
+        var nextId = ""+RDFStoreWorker.workerCallbacksCounter;
+        RDFStoreWorker.workerCallbacksCounter++;
+        RDFStoreWorker.workerCallbacks[nextId] = cb;
+        return nextId;
+    };
 
     RDFStoreWorker.handleCreate = function(argsObject, cb) {
+        // redefine NetworkTransport
+
+        if(typeof(NetworkTransport) != 'undefined'  && NetworkTransport != null) {
+            NetworkTransport = {
+                load: function(uri, graph, callback) {
+                    var cbId = RDFStoreWorker.registerCallback(function(results){
+                        callback.apply(callback,results);
+                    });
+                    postMessage({'fn':'workerRequest:NetworkTransport:load','callback':cbId, 'arguments':[uri,graph]});
+                },
+
+                loadFromFile: function(parser, graph, uri, callback) {
+
+                }
+            }
+        }
+
         args = [argsObject];
         //console.log("in handling create");
         args.push(function(result){
@@ -39808,7 +40839,14 @@ Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
     RDFStoreWorker.receive = function(packet) {
         var msg = packet.data || packet;
         //console.log("RECEIVED...");
-        if(msg.fn === 'create' && msg.args !=null) {
+        if(msg.fn === 'workerRequestResponse') {
+            var cbId = msg.callback;
+            var callback = RDFStoreWorker.workerCallbacks[cbId];
+            if(callback != null) {
+                delete RDFStoreWorker.workerCallbacks[cbId];
+                callback(msg.results);
+            }
+        } else if(msg.fn === 'create' && msg.args !=null) {
             //console.log("handling create");
             RDFStoreWorker.handleCreate(msg.args, msg.callback);
         } else if(msg.fn === 'setBatchLoadEvents') {
@@ -39956,9 +40994,13 @@ Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
             return new RDFJSInterface.NamedNode(node.nominalValue);
         }
     };
+
+    // @todo
+    // I'm setting a global var if this is not a worker
+    // FIXME!
+
     // set the receiver message
     onmessage = RDFStoreWorker.receive;
-
 
 // end of ./src/js-connection/src/rdfstore_worker.js 
 try {

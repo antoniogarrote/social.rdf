@@ -211,7 +211,7 @@ Extension.prototype.execute = function(account, bindings, dbClient){
                                                 dbClient.collection('stream', function(coll) {
                                                     //console.log("*** inserted tweet :"+lastId);
                                                     //console.log(microblogpost);
-                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost,{'upsert':true} function(err, res){
+                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost,{'upsert':true}, function(err, res){
                                                         k(floop, env);
                                                     });
                                                 });
@@ -222,8 +222,8 @@ Extension.prototype.execute = function(account, bindings, dbClient){
                                             });
                                         });
             } catch(e) {
-                //console.log("(!!!) Exception updating tweet stream");
-                //console.log(e);
+                console.log("(!!!) Exception updating tweet stream");
+                console.log(e);
             }
         };
 
@@ -232,8 +232,8 @@ Extension.prototype.execute = function(account, bindings, dbClient){
         updateFunction();
 
     } catch(e) {
-        //console.log("(!!!) exception executing twitter extension");
-        //console.log(e);
+        console.log("(!!!) exception executing twitter extension");
+        console.log(e);
     }
 
 };
@@ -299,7 +299,7 @@ Extension.prototype.import = function(account, bindings, dbClient){
                                                 dbClient.collection('stream', function(coll) {
                                                     //console.log("*** inserted tweet :"+lastId);
                                                     //console.log(microblogpost);
-                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost, {'upsert':true}function(err, res){
+                                                    coll.update({'@subject':microblogpost['@subject']},microblogpost, {'upsert':true}, function(err, res){
                                                         k(floop, env);
                                                     });
                                                 });

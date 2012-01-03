@@ -4,11 +4,13 @@ var core = require('./../core');
 var utils = require("./../utils").utils;
 var cp = require('child_process');
 var db = require('./../db');
-
-var routes = {'/extensions': 'extensionsHandler',
-              '/configuration': 'configurationHandler',
-              '/webid': 'webIDHandler',
-              '/webhooks':'webhooksHandler'};
+var url = require('url');
+var routes = {'extensionsHandler': /\/extensions/ ,
+              'configurationHandler': /\/configuration/ ,
+              'webIDHandler': /\/webid/,
+              'agentsHandler': /\/agents/,
+              'objectsHandler': /\/objects(\/([^\/]+))*/g,
+              'webhooksHandler': /\/webhooks/};
 
 var dbClient = new db.DB();
 
@@ -17,20 +19,41 @@ var Services = function(options){
 };
 
 var serveFile = utils.serveFile(configuration.admin.docroot);
+
 /**
  * Routing logic
  */
 Services.prototype.route = function(request, response, data, webID) {
     var handler = null;
-    for(var path in routes) {
-        if (request.url.indexOf(configuration.admin.baseUrl+path) == 0) {
-            handler = routes[path];
-            break;
+    var components = null;
+
+    console.log("checking base...");
+    console.log(configuration.admin.baseUrl);
+    console.log(request.url);
+
+    if(request.url.indexOf(configuration.admin.baseUrl)!=0) {
+        response.withCORSHeader(404, {"Content-Type":"text/plain"});
+        response.end();
+    } else {
+        for(var handlerString in routes) {
+            var path = routes[handlerString];
+            var requestPath = request.url.split("?")[0].split(configuration.admin.baseUrl).pop();
+           request.requestPath = requestPath;
+
+            if(requestPath && requestPath[requestPath.length-1] == '/') {
+                requestPath = requestPath.substring(0,requestPath.length-1);
+            }
+            
+            components = requestPath.match(path);
+            if (components!=null) {
+                handler = handlerString;
+                break;
+            }
         }
     }
     
     if(handler != null) {
-        this[handler](request.url.split(configuration.admin.baseUrl)[1], request, response, data, webID);
+        this[handler](request.url.split(configuration.admin.baseUrl)[1], request, components, response, data, webID);
     } else {
         var parts = request.url.split(configuration.admin.baseUrl);
         if(parts.length > 2) {
@@ -50,9 +73,89 @@ Services.prototype.route = function(request, response, data, webID) {
 };
 
 /**
+ * Returns all the objects of a certain type, or the list of object types as JSON-LD objects.
+ */
+Services.prototype.objectsHandler = function(path, request, components, response, data, webID) {
+    var that = this;
+    var params = url.parse(request.url,true,true).query;
+    if(request.method === 'GET') {
+        if(params == null || params['type']==null) {
+           this._listAllObjectTypes(request, response, data, webID);
+        } else if(params['type']!=null){
+	    console.log("TYPE:");
+	    console.log(params['type']);
+	    this._listObjectByType(params['type'],response);
+	} else {
+            response.writeHead(401, {"Content-Type":"text/plain"});
+            response.end();
+        }
+    } else {
+        response.writeHead(401, {"Content-Type":"text/plain"});
+        response.end();
+    }
+};
+
+/**
+ * Returns all the type of objects stored in the node
+ */
+Services.prototype._listAllObjectTypes = function(request, response, data, webID) {
+    dbClient.typesInCollection('objects', function(err, types) {
+        if(err) {
+            response.writeHead(500, {"Content-Type":"text/plain"});
+            response.end();
+        } else {
+            var res = {'@subject':core.vocabulary.configuration.the_server};
+            core.jsonld.addValue(res,
+                                 core.vocabulary.configuration.stores_object_types,
+                                 types,
+                                 '@iri');
+
+            response.writeHead(200, {"Content-Type":"application/json"});
+            response.end(new Buffer(JSON.stringify(res)),'utf-8');
+        }
+    });
+};
+
+/**
+ * Returns all the objects for a certain type
+ */
+Services.prototype._listObjectByType = function(type, response, data, webID) {
+    dbClient.objectsByType(type, function(err, objects) {
+        if(err) {
+            response.writeHead(500, {"Content-Type":"text/plain"});
+            response.end();
+        } else {
+            response.writeHead(200, {"Content-Type":"application/json"});
+	    var acum = [];
+            for(var i=0; i<objects.length; i++) {
+                acum.push(utils.cleanMongoProperties(objects[i]));
+            }
+	    
+            response.end(new Buffer(JSON.stringify(acum)),'utf-8');
+        }
+    });
+};
+
+/**
+ * Manipulates the WebIDs of agents
+ */
+Services.prototype.objectsHandler = function(path, request, components, response, data, webID) {
+    var that = this;
+    if(request.method === 'POST') {
+	// creates a new agent associated to the webID provided as a parameter
+	var params = url.parse(request.url,true,true).query;
+	var webIDURL = params['webid'];
+	
+    } else {
+        response.writeHead(401, {"Content-Type":"text/plain"});
+        response.end();
+    }
+};
+
+/**
  * Returns all the loaded extensions as JSON-LD objects.
  */
-Services.prototype.extensionsHandler = function(path, request, response, data, webID) {
+Services.prototype.extensionsHandler = function(path, request, components, response, data, webID) {
     var that = this;
     if(request.method === 'GET') {
         var extensions = [];
@@ -205,8 +308,8 @@ Services.prototype._createExtensionHandler = function(request, response, data, w
                                         [extensionIri, accountIri, 'import']);
                     console.log(" -- account forked");
                     console.log(" -- starting account <"+accountIri+"> generated by <"+extensionIri+">");
-                    var child = cp.fork(__dirname + '/../extension_launcher.js',
-                                        [extensionIri, accountIri, 'execute']);
+                    child = cp.fork(__dirname + '/../extension_launcher.js',
+                                    [extensionIri, accountIri, 'execute']);
                     console.log(" -- account forked");
                     core.extensions.registerExtensionAccount(accountIri, child);
                 } catch(e) {
@@ -233,7 +336,7 @@ Services.prototype._createExtensionHandler = function(request, response, data, w
 /**
  * Returns configuration info about the server
  */
-Services.prototype.configurationHandler = function(path, request, response, data, webID) {
+Services.prototype.configurationHandler = function(path, request, components, response, data, webID) {
     var that = this;
     if(request.method === 'GET') {
         core.vocabulary.configuration.makeWebIDConfigurationData(function(err, config) {
@@ -259,7 +362,7 @@ Services.prototype.configurationHandler = function(path, request, response, data
 /**
  * Returns Managed WebID and associated profile information  as JSON-LD objects.
  */
-Services.prototype.webIDHandler = function(path, request, response, data, webID) {
+Services.prototype.webIDHandler = function(path, request, components, response, data, webID) {
     var that = this;
     if(request.method === 'GET') {
         core.managedWebID(function(err, node) {

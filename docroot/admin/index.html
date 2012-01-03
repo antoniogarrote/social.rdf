@@ -31,24 +31,26 @@
 
           store.load("remote", "/admin/configuration", function(result, data) {
               store.load("remote", "/admin/extensions", function(result, data){
-                  // proxy instead of ajax+cors
-                  store.load("remote", "/admin/webid", function(result, data){
-                  /*
-                   * CORS fails in some browsers (Firefox8), use call to proxy above (/admin/webid)
-                   * store.execute("select ?webid { ?s <http://social-rdf.org/vocab/configuration#managed_webid> ?webid  }", function(err, res) {
-                   *    console.log(res);
-                   *    console.log("GOT WebID: "+res[0].webid.value);
-                   *    store.load("remote", res[0].webid.value, function(result,data) {
-                  */
-                      sko.ready(store, function(){
-                          // all data loaded, now always fire events
-                          store.setBatchLoadEvents(true);
-                          // load all the default namespaces
-                          store.registerDefaultProfileNamespaces();
-                          store.registerDefaultNamespace("srcfg","http://social-rdf.org/vocab/configuration#");
-                          // initialize dependent observables
-                          socialrdf.admin.controller.initialize(function(){
-                            sko.applyBindings("body", socialrdf.admin.controller, function(){});
+                  store.load("remote", "/admin/objects", function(result, data){
+                      // proxy instead of AJAX+CORS
+                      store.load("remote", "/admin/webid", function(result, data){
+                          /*
+                           * CORS fails in some browsers (Firefox8), use call to proxy above (/admin/webid)
+                           * store.execute("select ?webid { ?s <http://social-rdf.org/vocab/configuration#managed_webid> ?webid  }", function(err, res) {
+                           *    console.log(res);
+                           *    console.log("GOT WebID: "+res[0].webid.value);
+                           *    store.load("remote", res[0].webid.value, function(result,data) {
+                           */
+                          sko.ready(store, function(){
+                              // all data loaded, now always fire events
+                              store.setBatchLoadEvents(true);
+                              // load all the default namespaces
+                              store.registerDefaultProfileNamespaces();
+                              store.registerDefaultNamespace("srcfg","http://social-rdf.org/vocab/configuration#");
+                              // initialize dependent observables
+                              socialrdf.admin.controller.initialize(function(){
+                                  sko.applyBindings("body", socialrdf.admin.controller, function(){});
+                              });
                           });
                       });
                   });
@@ -83,6 +85,11 @@
                 <ul class='dropdown-menu' data-bind='template: "extensions-dropdown-template"'></ul>
               <li>
             </ul>
+
+            <ul class='nav sencodary-nav' id='objects' style='float:right'>
+              <a href='#' data-bind="click: showObjectBrowser">Objects</a>
+            </ul>
+
           </div>
         </div>
       </div>
@@ -112,16 +119,17 @@
     <script id='panel-for-extension' type='text/html'>
       {{if selectedExtension()==='<http://social-rdf.org/vocab/WebID>'}}
         {{if isLocalWebID()===true }}
-          <section about='webid' data-bind='template:"panel-webid-edit"'>
-          </section>
+          <section about='webid' data-bind='template:"panel-webid-edit"'></section>
         {{else}}
-             <div id='webid-profile'><p>remote WebID</p></div>
+          <div id='webid-profile'><p>remote WebID</p></div>
         {{/if}}
+      {{else selectedExtension()==='<http://social-rdf.org/vocab/objectBrowser>'}}
+	    <section data-bind='template:"object-browser-panels"'></section>
       {{else}}
         {{if isSelectedExtensionInstalled()===false }}
-          <section about='selectedExtension' id='section-install-extension' data-bind='template:"panel-install-extension"'></section>
+            <section about='selectedExtension' id='section-install-extension' data-bind='template:"panel-install-extension"'></section>
         {{else}}
-          <section about='selectedExtension' id='section-install-extension' data-bind='template:"panel-install-extension"'></section>
+            <section about='selectedExtension' id='section-install-extension' data-bind='template:"panel-install-extension"'></section>
         {{/if}}
       {{/if}}
     </script>
@@ -409,8 +417,12 @@
             <div class='clearfix extension-configuration-option'>
           {{/if}}
 
-            <label data-bind='text: <http://www.w3.org/2000/01/rdf-schema#label>'></label>
-              <div class='input'>
+            {{if isSelectedExtensionInstalled()==true}}
+              <label about='${$value}' tmp='$value' data-bind='text: <http://www.w3.org/2000/01/rdf-schema#label>'></label>
+            {{else}}
+              <label data-bind='text: <http://www.w3.org/2000/01/rdf-schema#label>'></label>
+            {{/if}}
+            <div class='input'>
 
                 <!-- get the default value if the extension is not
                 installed, of the value in configured in the linked
@@ -458,6 +470,22 @@
         {{/each}}
       </fieldset>
     </script> 
+
+    <!-- Template for object browser -->
+    <script id='object-browser-panels' type='text/html'>
+      <div class='container-fluid'>
+	<div class='sidebar'>
+	  <ul>
+	    {{each objectTypes}}
+    	      <li><a href='#' data-bind='text: $value.label, click: function(){ selectObjectType($value.value) }'></a></li>
+            {{/each}}
+	  </ul>
+	</div>
+	<div class='content'>
+	  objecs here
+	</div>
+      </div>
+    </script>
 
 </body>
 

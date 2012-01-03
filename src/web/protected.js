@@ -27,8 +27,7 @@ Services.prototype.route = function(request, response, data, webID) {
             break;
         }
     }
-    console.log("got a handler?");
-    console.log(handler);
+
     if(handler != null) {
         this[handler](request.url.split(configuration.admin.baseUrl)[1], request, response, data, request.profileWebId);
     } else {

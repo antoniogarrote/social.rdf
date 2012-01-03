@@ -11,8 +11,6 @@
     <link rel="stylesheet" href="/social/css/rdfstore_frontend.css">
     <script type='text/javascript' src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
     <script type='text/javascript' src='http://ajax.microsoft.com/ajax/jquery.templates/beta1/jquery.tmpl.min.js'></script>
-    <script type='text/javascript' src="/social/js/jquery.min.js"></script>
-    <script type='text/javascript' src='/social/js/jquery.tmpl.js'></script>
     <script type='text/javascript' src="/social/js/bootstrap-dropdown.js"></script>
     <script type='text/javascript' src="/social/js/bootstrap-modal.js"></script>
     <script type='text/javascript' src="/social/js/knockout.js"></script>

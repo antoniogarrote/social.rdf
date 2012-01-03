@@ -300,23 +300,32 @@ Utils.lexicalFormLiteral = function(term, env) {
     if(value != null && type != null && typeof(type) != 'string') {
         var typeValue = type.value;
 
-        if(typeValue != null) {
-            indexedValue = '"' + term.value + '"^^<' + typeValue + '>';
-        } else {
+        if(typeValue == null) {
             var typePrefix = type.prefix;
             var typeSuffix = type.suffix;
 
             var resolvedPrefix = env.namespaces[typePrefix];
             term.type = resolvedPrefix+typeSuffix;
-            indexedValue = '"' + term.value + '"^^<' + resolvedPrefix + typeSuffix + '>';
+	    typeValue = resolvedPrefix+typeSuffix;
         }
+	// normalization
+	if(typeValue.indexOf('hexBinary') != -1) {
+            indexedValue = '"' + term.value.toLowerCase() + '"^^<' + typeValue + '>';
+	} else {
+            indexedValue = '"' + term.value + '"^^<' + typeValue + '>';
+	}
     } else {
         if(lang == null && type == null) {
             indexedValue = '"' + value + '"';
         } else if(type == null) {
             indexedValue = '"' + value + '"' + "@" + lang;        
         } else {
-            indexedValue = '"' + term.value + '"^^<'+type+'>';
+	    // normalization
+	    if(type.indexOf('hexBinary') != -1) {
+		indexedValue = '"' + term.value.toLowerCase() + '"^^<'+type+'>';
+	    } else {
+		indexedValue = '"' + term.value + '"^^<'+type+'>';
+	    }
         }
     }
     return indexedValue;
@@ -335,6 +344,8 @@ Utils.lexicalFormBaseUri = function(term, env) {
         var resolvedPrefix = env.namespaces[prefix];
         if(resolvedPrefix != null) {            
             uri = resolvedPrefix+suffix;
+        } else {
+            uri = prefix+":"+suffix;
         }
     } else {
         //console.log(" - URI is not prefixed");
@@ -1686,6 +1697,19 @@ Lexicon.Lexicon.prototype.resolveUri = function(uri) {
     }
 };
 
+Lexicon.Lexicon.prototype.resolveUriCost = function(uri) {
+    if(uri === this.defaultGraphUri) {
+        return(this.defaultGraphOid);
+    } else {
+        var oidCounter = this.uriToOID[uri];
+        if(oidCounter != null) {
+            return(oidCounter[1]);
+        } else {
+            return(-1);
+        }
+    }
+};
+
 Lexicon.Lexicon.prototype.registerBlank = function(label) {
     var oid = this.oidCounter;
     this.oidCounter++;
@@ -1704,6 +1728,10 @@ Lexicon.Lexicon.prototype.resolveBlank = function(label) {
     var oid = this.oidCounter;
     this.oidCounter++
     return(""+oid);
+};
+
+Lexicon.Lexicon.prototype.resolveBlankCost = function(label) {
+    return 0;
 };
 
 Lexicon.Lexicon.prototype.registerLiteral = function(literal) {
@@ -1734,9 +1762,19 @@ Lexicon.Lexicon.prototype.resolveLiteral = function(literal) {
     }
 }
 
+Lexicon.Lexicon.prototype.resolveLiteralCost = function(literal) {
+    var oidCounter = this.literalToOID[literal];
+    if(oidCounter != null ) {
+        return(oidCounter[1]); 
+    } else {
+        return(0); 
+    }
+}
+
+
 Lexicon.Lexicon.prototype.parseLiteral = function(literalString) {
     var parts = literalString.lastIndexOf("@");
-    if(parts!=-1 && literalString[parts-1]==='"') {
+    if(parts!=-1 && literalString[parts-1]==='"' && literalString.substring(parts, literalString.length).match(/^@[a-zA-Z\-]+$/g)!=null) {
         var value = literalString.substring(1,parts-1);
         var lang = literalString.substring(parts+1, literalString.length);
         return {token: "literal", value:value, lang:lang};
@@ -1950,17 +1988,8 @@ var _setMembers = function(self, obj)
    }
 };
 
-// define jsonld
-if(typeof(window) !== 'undefined')
-{
-   var jsonld = window.jsonld = window.jsonld || {};
-   Exception = function(obj)
-   {
-      _setMembers(this, obj);
-   }
-}
 // define node.js module
-else if(typeof(module) !== 'undefined' && module.exports)
+if(typeof(module) !== 'undefined' && module.exports)
 {
    var jsonld = {};
    Exception = function(obj)
@@ -1968,6 +1997,25 @@ else if(typeof(module) !== 'undefined' && module.exports)
       _setMembers(this, obj);
       this.stack = new Error().stack;
    };
+}
+// define jsonld
+else if(typeof(window) !== 'undefined')
+{
+   var jsonld = window.jsonld = window.jsonld || {};
+   Exception = function(obj)
+   {
+      _setMembers(this, obj);
+   }
+}
+// Web worker running in the browser
+else 
+{
+    window = {};
+    var jsonld = window.jsonld = {};
+   Exception = function(obj)
+   {
+      _setMembers(this, obj);
+   }
 }
 
 jsonldParser = jsonld;
@@ -2048,7 +2096,7 @@ var _clone = function(value)
    if(value.constructor === Object)
    {
       rval = {};
-      var keys = Object.keys(value).sort();
+      var keys = Utils.keys(value).sort();
       for(var i in keys)
       {
          var key = keys[i];
@@ -2338,7 +2386,7 @@ jsonld.compact = function(ctx, input)
          var out = new Processor().compact(_clone(ctx), null, tmp[i], ctxOut);
          
          // add context if used
-         if(Object.keys(ctxOut).length > 0)
+         if(Utils.keys(ctxOut).length > 0)
          {
             out['@context'] = ctxOut;
          }
@@ -2559,14 +2607,6 @@ jsonld.toTriples = function(input, graph, callback)
       rval = [];
       callback = function(s, p, o)
       {
-//         console.log("SUBJECT");
-//         console.log(s);
-//         console.log("PREDICATE");
-//         console.log(p);
-//         console.log("OBJECT");
-//         console.log(o);
-//         console.log(Utils);
-
          rval.push({'subject': Utils.lexicalFormTerm(s), 
                     'predicate': Utils.lexicalFormTerm(p), 
                     'object': Utils.lexicalFormTerm(o), 
@@ -3025,7 +3065,7 @@ Processor.prototype.normalize = function(input)
       {
          var s = subjects[key];
          var sorted = {};
-         var keys = Object.keys(s).sort();
+         var keys = Utils.keys(s).sort();
          for(var i in keys)
          {
             var k = keys[i];
@@ -3756,7 +3796,7 @@ Processor.prototype.canonicalizeBlankNodes = function(input)
          }
          
          // sort keys by value to name them in order
-         var keys = Object.keys(mapping);
+         var keys = Utils.keys(mapping);
          keys.sort(function(a, b)
          {
             return _compare(mapping[a], mapping[b]);
@@ -4114,7 +4154,7 @@ Processor.prototype.serializeCombos = function(
    // no more adjacent bnodes to map, update serialization
    else
    {
-      var keys = Object.keys(mapped).sort();
+      var keys = Utils.keys(mapped).sort();
       mb.adj[siri] = { i: iri, k: keys, m: mapped };
       mb.serialize(this.subjects, this.edges);
       
@@ -4286,7 +4326,7 @@ Processor.prototype.deepCompareBlankNodes = function(a, b)
                {
                   // keep same mapping and count from 'props' serialization
                   mb.mapping = _clone(sA['props'].m);
-                  mb.count = Object.keys(mb.mapping).length + 1;
+                  mb.count = Utils.keys(mb.mapping).length + 1;
                }
                this.serializeBlankNode(sA, iriA, mb, dir);
             }
@@ -4297,7 +4337,7 @@ Processor.prototype.deepCompareBlankNodes = function(a, b)
                {
                   // keep same mapping and count from 'props' serialization
                   mb.mapping = _clone(sB['props'].m);
-                  mb.count = Object.keys(mb.mapping).length + 1;
+                  mb.count = Utils.keys(mb.mapping).length + 1;
                }
                this.serializeBlankNode(sB, iriB, mb, dir);
             }
@@ -4336,8 +4376,8 @@ Processor.prototype.shallowCompareBlankNodes = function(a, b)
       5.2. The bnode with the alphabetically-first reference iri is first.
       5.3. The bnode with the alphabetically-first reference property is first.
     */
-   var pA = Object.keys(a);
-   var pB = Object.keys(b);
+   var pA = Utils.keys(a);
+   var pB = Utils.keys(b);
    
    // step #1
    rval = _compare(pA.length, pB.length);
@@ -4545,7 +4585,7 @@ var _isDuckType = function(input, frame)
    if(!(type in frame))
    {
       // get frame properties that must exist on input
-      var props = Object.keys(frame).filter(function(e)
+      var props = Utils.keys(frame).filter(function(e)
       {
          // filter non-keywords
          return e.indexOf('@') !== 0;
@@ -5208,6 +5248,8 @@ AbstractQueryTree.AbstractQueryTree.prototype.collectBasicTriples = function(aqt
         acum = this.collectBasicTriples(aqt.rvalue, acum);
     } else if(aqt.kind === 'FILTER') {
         acum = this.collectBasicTriples(aqt.value, acum);
+    } else if(aqt.kind === 'construct') {
+        acum = this.collectBasicTriples(aqt.pattern,acum);
     } else if(aqt.kind === 'EMPTY_PATTERN') {
         // nothing
     } else {
@@ -8497,7 +8539,7 @@ SparqlParser.parser = (function(){
         }
         var result2 = result1 !== null
           ? (function(t, gs, w, sm) {
-                var dataset = {named:[], 'default':[]};
+                var dataset = {'named':[], 'default':[]};
                 for(var i=0; i<gs.length; i++) {
                     var g = gs[i];
                     if(g.kind === 'default') {
@@ -18609,32 +18651,178 @@ SparqlParser.parser = (function(){
           var result4 = [];
           var savedPos2 = pos;
           var result6 = [];
-          var result11 = parse_WS();
-          while (result11 !== null) {
-            result6.push(result11);
-            var result11 = parse_WS();
+          var result25 = parse_WS();
+          while (result25 !== null) {
+            result6.push(result25);
+            var result25 = parse_WS();
           }
           if (result6 !== null) {
-            if (input.substr(pos, 5) === "UNION") {
-              var result7 = "UNION";
-              pos += 5;
+            if (input.substr(pos, 1) === "U") {
+              var result24 = "U";
+              pos += 1;
             } else {
-              var result7 = null;
+              var result24 = null;
               if (reportMatchFailures) {
-                matchFailed("\"UNION\"");
+                matchFailed("\"U\"");
               }
             }
+            if (result24 !== null) {
+              var result7 = result24;
+            } else {
+              if (input.substr(pos, 1) === "u") {
+                var result23 = "u";
+                pos += 1;
+              } else {
+                var result23 = null;
+                if (reportMatchFailures) {
+                  matchFailed("\"u\"");
+                }
+              }
+              if (result23 !== null) {
+                var result7 = result23;
+              } else {
+                var result7 = null;;
+              };
+            }
             if (result7 !== null) {
-              var result8 = [];
-              var result10 = parse_WS();
-              while (result10 !== null) {
-                result8.push(result10);
-                var result10 = parse_WS();
+              if (input.substr(pos, 1) === "N") {
+                var result22 = "N";
+                pos += 1;
+              } else {
+                var result22 = null;
+                if (reportMatchFailures) {
+                  matchFailed("\"N\"");
+                }
+              }
+              if (result22 !== null) {
+                var result8 = result22;
+              } else {
+                if (input.substr(pos, 1) === "n") {
+                  var result21 = "n";
+                  pos += 1;
+                } else {
+                  var result21 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"n\"");
+                  }
+                }
+                if (result21 !== null) {
+                  var result8 = result21;
+                } else {
+                  var result8 = null;;
+                };
               }
               if (result8 !== null) {
-                var result9 = parse_GroupGraphPattern();
+                if (input.substr(pos, 1) === "I") {
+                  var result20 = "I";
+                  pos += 1;
+                } else {
+                  var result20 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"I\"");
+                  }
+                }
+                if (result20 !== null) {
+                  var result9 = result20;
+                } else {
+                  if (input.substr(pos, 1) === "i") {
+                    var result19 = "i";
+                    pos += 1;
+                  } else {
+                    var result19 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"i\"");
+                    }
+                  }
+                  if (result19 !== null) {
+                    var result9 = result19;
+                  } else {
+                    var result9 = null;;
+                  };
+                }
                 if (result9 !== null) {
-                  var result5 = [result6, result7, result8, result9];
+                  if (input.substr(pos, 1) === "O") {
+                    var result18 = "O";
+                    pos += 1;
+                  } else {
+                    var result18 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"O\"");
+                    }
+                  }
+                  if (result18 !== null) {
+                    var result10 = result18;
+                  } else {
+                    if (input.substr(pos, 1) === "o") {
+                      var result17 = "o";
+                      pos += 1;
+                    } else {
+                      var result17 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"o\"");
+                      }
+                    }
+                    if (result17 !== null) {
+                      var result10 = result17;
+                    } else {
+                      var result10 = null;;
+                    };
+                  }
+                  if (result10 !== null) {
+                    if (input.substr(pos, 1) === "N") {
+                      var result16 = "N";
+                      pos += 1;
+                    } else {
+                      var result16 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"N\"");
+                      }
+                    }
+                    if (result16 !== null) {
+                      var result11 = result16;
+                    } else {
+                      if (input.substr(pos, 1) === "n") {
+                        var result15 = "n";
+                        pos += 1;
+                      } else {
+                        var result15 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"n\"");
+                        }
+                      }
+                      if (result15 !== null) {
+                        var result11 = result15;
+                      } else {
+                        var result11 = null;;
+                      };
+                    }
+                    if (result11 !== null) {
+                      var result12 = [];
+                      var result14 = parse_WS();
+                      while (result14 !== null) {
+                        result12.push(result14);
+                        var result14 = parse_WS();
+                      }
+                      if (result12 !== null) {
+                        var result13 = parse_GroupGraphPattern();
+                        if (result13 !== null) {
+                          var result5 = [result6, result7, result8, result9, result10, result11, result12, result13];
+                        } else {
+                          var result5 = null;
+                          pos = savedPos2;
+                        }
+                      } else {
+                        var result5 = null;
+                        pos = savedPos2;
+                      }
+                    } else {
+                      var result5 = null;
+                      pos = savedPos2;
+                    }
+                  } else {
+                    var result5 = null;
+                    pos = savedPos2;
+                  }
                 } else {
                   var result5 = null;
                   pos = savedPos2;
@@ -18655,32 +18843,178 @@ SparqlParser.parser = (function(){
             result4.push(result5);
             var savedPos2 = pos;
             var result6 = [];
-            var result11 = parse_WS();
-            while (result11 !== null) {
-              result6.push(result11);
-              var result11 = parse_WS();
+            var result25 = parse_WS();
+            while (result25 !== null) {
+              result6.push(result25);
+              var result25 = parse_WS();
             }
             if (result6 !== null) {
-              if (input.substr(pos, 5) === "UNION") {
-                var result7 = "UNION";
-                pos += 5;
+              if (input.substr(pos, 1) === "U") {
+                var result24 = "U";
+                pos += 1;
               } else {
-                var result7 = null;
+                var result24 = null;
                 if (reportMatchFailures) {
-                  matchFailed("\"UNION\"");
+                  matchFailed("\"U\"");
                 }
               }
+              if (result24 !== null) {
+                var result7 = result24;
+              } else {
+                if (input.substr(pos, 1) === "u") {
+                  var result23 = "u";
+                  pos += 1;
+                } else {
+                  var result23 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"u\"");
+                  }
+                }
+                if (result23 !== null) {
+                  var result7 = result23;
+                } else {
+                  var result7 = null;;
+                };
+              }
               if (result7 !== null) {
-                var result8 = [];
-                var result10 = parse_WS();
-                while (result10 !== null) {
-                  result8.push(result10);
-                  var result10 = parse_WS();
+                if (input.substr(pos, 1) === "N") {
+                  var result22 = "N";
+                  pos += 1;
+                } else {
+                  var result22 = null;
+                  if (reportMatchFailures) {
+                    matchFailed("\"N\"");
+                  }
+                }
+                if (result22 !== null) {
+                  var result8 = result22;
+                } else {
+                  if (input.substr(pos, 1) === "n") {
+                    var result21 = "n";
+                    pos += 1;
+                  } else {
+                    var result21 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"n\"");
+                    }
+                  }
+                  if (result21 !== null) {
+                    var result8 = result21;
+                  } else {
+                    var result8 = null;;
+                  };
                 }
                 if (result8 !== null) {
-                  var result9 = parse_GroupGraphPattern();
+                  if (input.substr(pos, 1) === "I") {
+                    var result20 = "I";
+                    pos += 1;
+                  } else {
+                    var result20 = null;
+                    if (reportMatchFailures) {
+                      matchFailed("\"I\"");
+                    }
+                  }
+                  if (result20 !== null) {
+                    var result9 = result20;
+                  } else {
+                    if (input.substr(pos, 1) === "i") {
+                      var result19 = "i";
+                      pos += 1;
+                    } else {
+                      var result19 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"i\"");
+                      }
+                    }
+                    if (result19 !== null) {
+                      var result9 = result19;
+                    } else {
+                      var result9 = null;;
+                    };
+                  }
                   if (result9 !== null) {
-                    var result5 = [result6, result7, result8, result9];
+                    if (input.substr(pos, 1) === "O") {
+                      var result18 = "O";
+                      pos += 1;
+                    } else {
+                      var result18 = null;
+                      if (reportMatchFailures) {
+                        matchFailed("\"O\"");
+                      }
+                    }
+                    if (result18 !== null) {
+                      var result10 = result18;
+                    } else {
+                      if (input.substr(pos, 1) === "o") {
+                        var result17 = "o";
+                        pos += 1;
+                      } else {
+                        var result17 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"o\"");
+                        }
+                      }
+                      if (result17 !== null) {
+                        var result10 = result17;
+                      } else {
+                        var result10 = null;;
+                      };
+                    }
+                    if (result10 !== null) {
+                      if (input.substr(pos, 1) === "N") {
+                        var result16 = "N";
+                        pos += 1;
+                      } else {
+                        var result16 = null;
+                        if (reportMatchFailures) {
+                          matchFailed("\"N\"");
+                        }
+                      }
+                      if (result16 !== null) {
+                        var result11 = result16;
+                      } else {
+                        if (input.substr(pos, 1) === "n") {
+                          var result15 = "n";
+                          pos += 1;
+                        } else {
+                          var result15 = null;
+                          if (reportMatchFailures) {
+                            matchFailed("\"n\"");
+                          }
+                        }
+                        if (result15 !== null) {
+                          var result11 = result15;
+                        } else {
+                          var result11 = null;;
+                        };
+                      }
+                      if (result11 !== null) {
+                        var result12 = [];
+                        var result14 = parse_WS();
+                        while (result14 !== null) {
+                          result12.push(result14);
+                          var result14 = parse_WS();
+                        }
+                        if (result12 !== null) {
+                          var result13 = parse_GroupGraphPattern();
+                          if (result13 !== null) {
+                            var result5 = [result6, result7, result8, result9, result10, result11, result12, result13];
+                          } else {
+                            var result5 = null;
+                            pos = savedPos2;
+                          }
+                        } else {
+                          var result5 = null;
+                          pos = savedPos2;
+                        }
+                      } else {
+                        var result5 = null;
+                        pos = savedPos2;
+                      }
+                    } else {
+                      var result5 = null;
+                      pos = savedPos2;
+                    }
                   } else {
                     var result5 = null;
                     pos = savedPos2;
@@ -18719,9 +19053,9 @@ SparqlParser.parser = (function(){
           
                     for(var i=0; i<b.length; i++) {
                         if(i==b.length-1) {
-                            lastToken.value.push(b[i][3]);
+                            lastToken.value.push(b[i][7]);
                         } else {
-                            lastToken.value.push(b[i][3]);
+                            lastToken.value.push(b[i][7]);
                             var newToken = {token: 'graphunionpattern',
                                             value: [lastToken]}
           
@@ -19688,6 +20022,8 @@ SparqlParser.parser = (function(){
                   for(var i=0; i< pairs.pairs.length; i++) {
                       var pair = pairs.pairs[i];
                       var triple = null;
+          	    if(pair[1].length != null)
+          	      pair[1] = pair[1][0]
                       if(subject.token && subject.token==='triplesnodecollection') {
                           triple = {subject: subject.chainSubject[0], predicate: pair[0], object: pair[1]}
                           triplesContext.push(triple);
@@ -19761,6 +20097,9 @@ SparqlParser.parser = (function(){
                   if(pairs.pairs) {
                     for(var i=0; i< pairs.pairs.length; i++) {
                         var pair = pairs.pairs[i];
+                        if(pair[1].length != null)
+            	      pair[1] = pair[1][0]
+            
                         if(tn.token === "triplesnodecollection") {
                             for(var j=0; j<subject.length; j++) {
                                 var subj = subject[j];
@@ -21480,7 +21819,7 @@ SparqlParser.parser = (function(){
           ? (function(pl) {
           
                 GlobalBlankNodeCounter++;
-                var subject = {token:'blank', label:''+GlobalBlankNodeCounter};
+                var subject = {token:'blank', label:'_:'+GlobalBlankNodeCounter};
                 var newTriples =  [];
           
                 for(var i=0; i< pl.pairs.length; i++) {
@@ -21488,6 +21827,8 @@ SparqlParser.parser = (function(){
                     var triple = {}
                     triple.subject = subject;
                     triple.predicate = pair[0];
+                    if(pair[1].length != null)
+          	    pair[1] = pair[1][0]
                     triple.object = pair[1];
                     newTriples.push(triple);
                 }
@@ -30872,7 +31213,7 @@ SparqlParser.parser = (function(){
           var savedPos0 = pos;
           var result2 = parse_ANON();
           var result3 = result2 !== null
-            ? (function() { GlobalBlankNodeCounter++; return {token:'blank', label:''+GlobalBlankNodeCounter} })()
+            ? (function() { GlobalBlankNodeCounter++; return {token:'blank', label:'_:'+GlobalBlankNodeCounter} })()
             : null;
           if (result3 !== null) {
             var result1 = result3;
@@ -30921,24 +31262,24 @@ SparqlParser.parser = (function(){
         }
         if (result3 !== null) {
           var result4 = [];
-          if (input.substr(pos).match(/^[^<>"{} | ^\\]/) !== null) {
+          if (input.substr(pos).match(/^[^<>"{}|^`\\]/) !== null) {
             var result6 = input.charAt(pos);
             pos++;
           } else {
             var result6 = null;
             if (reportMatchFailures) {
-              matchFailed("[^<>\"{} | ^\\\\]");
+              matchFailed("[^<>\"{}|^`\\\\]");
             }
           }
           while (result6 !== null) {
             result4.push(result6);
-            if (input.substr(pos).match(/^[^<>"{} | ^\\]/) !== null) {
+            if (input.substr(pos).match(/^[^<>"{}|^`\\]/) !== null) {
               var result6 = input.charAt(pos);
               pos++;
             } else {
               var result6 = null;
               if (reportMatchFailures) {
-                matchFailed("[^<>\"{} | ^\\\\]");
+                matchFailed("[^<>\"{}|^`\\\\]");
               }
             }
           }
@@ -34017,8 +34358,6 @@ SparqlParser.parser = (function(){
   
   return result;
 })();
-
-
 // end of ./src/js-sparql-parser/src/sparql_parser.js 
 // exports
 var TurtleParser = {};
@@ -34170,7 +34509,11 @@ RDFJSInterface.UrisMap.prototype.resolve = function(curie) {
     var ns = parts[0];
     var suffix = parts[1];
     if(ns === '') {
-        return this.defaultNs + suffix;
+        if(this.defaultNs == null) {
+            return null;
+        } else {
+            return this.defaultNs + suffix;
+        }
     } else if(this[ns] != null) {
         return this[ns] + suffix;
     } else {
@@ -34182,7 +34525,7 @@ RDFJSInterface.UrisMap.prototype.shrink = function(iri) {
     for(var ns in this) {
         var prefix = this[ns];
         if(iri.indexOf(prefix) === 0) {
-            if(prefix !== '') {
+            if(prefix !== '' && ns != 'defaultNs') {
                 var suffix = iri.split(prefix)[1];
                 return ns + ":" + suffix;
             }
@@ -36403,17 +36746,9 @@ QueryFilters.runIriRefOrFunction = function(iriref, args, bindings,queryEngine, 
 
 // end of ./src/js-query-engine/src/query_filters.js 
 // exports
-var QueryPlan = {};
+var QueryPlanDPSize = {};
 
-// imports
-
-QueryPlan.orderJoins = function(bgps) {
-    // @todo order joins somehow
-    return bgps;
-};
-
-
-QueryPlan.variablesInBGP = function(bgp) {
+QueryPlanDPSize.variablesInBGP = function(bgp) {
     // may be cached in the pattern
     var variables = bgp.variables;
     if(variables) {
@@ -36434,10 +36769,21 @@ QueryPlan.variablesInBGP = function(bgp) {
     return variables;
 };
 
-QueryPlan.variablesIntersectionBGP = function(bgpa, bgpb) {
-    var varsa = QueryPlan.variablesInBGP(bgpa).sort();
-    var varsb = QueryPlan.variablesInBGP(bgpb).sort();
+QueryPlanDPSize.connected = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            return true;
+        }
+    }
 
+    return false;
+};
+
+// @modified dp
+QueryPlanDPSize.variablesIntersectionBGP = function(bgpa, bgpb) {
+    var varsa = QueryPlanDPSize.variablesInBGP(bgpa).sort();
+    var varsb = QueryPlanDPSize.variablesInBGP(bgpb).sort();
     var ia = 0;
     var ib = 0;
 
@@ -36458,108 +36804,327 @@ QueryPlan.variablesIntersectionBGP = function(bgpa, bgpb) {
     return intersection;
 };
 
-QueryPlan.executeAndBGPs = function(bgps, dataset, queryEngine, env) {
-    //for(var i=0; i<bgps.length; i++) {
-    //    if(bgps[i].graph == null) {
-    //        bgps[i].graph = dataset;
-    //    } else if(dataset != null && dataset.length != 0) {
-    //        bgps[i].graph = dataset;
-    //    }
-    //}
-    var pairs = Utils.partition(bgps,2);
-    return QueryPlan.buildBushyJoinTreeBase(pairs, dataset, queryEngine, env);
-};
+//@modified dp
+/**
+ * All BGPs sharing variables are grouped together.
+ */
+QueryPlanDPSize.executeAndBGPsGroups = function(bgps) {
+    var groups = {};
+    var groupVars = {};
+    var groupId = 0;
+    for(var i=0; i<bgps.length; i++) {
+        var bgp = bgps[i];
 
-QueryPlan.buildBushyJoinTreeBase = function(pairs, dataset, queryEngine, queryEnv) {
+        var vars = [];
+        for(var comp in bgp) {
+            if(comp != '_cost') {
+                if(bgp[comp].token === 'var') {
+                    vars.push(bgp[comp].value)
+                } else if(bgp[comp].token === 'blank') {
+                    vars.push(bgp[comp].label);
+                }
+            }
+        }
+
+        var foundGroup = false;
+        for(var nextGroupId in groupVars) {
+            groupVar = groupVars[nextGroupId];
+            for(var j=0; j<vars.length; j++) {
+                var thisVar = "/"+vars[j]+"/";
+                if(groupVar.indexOf(thisVar) != -1) {
+                    groups[nextGroupId].push(bgp);
+                    groupVars[nextGroupId] = groupVar+(vars.join("/"))+"/"
+                    foundGroup = true;
+                    break;
+                }
+            }
+            if(foundGroup)
+                break;
+        }
+        if(!foundGroup) {
+            groups[groupId] = [bgp];
+            groupVars[groupId] = "/"+(vars.join("/"))+"/";
+            groupId++;
+        }
+    }
+
     var acum = [];
-    for(var i=0; i<pairs.length; i++) {
-        var pair = pairs[i];
-        var bgpa = pair[0];
-        var bgpb = pair[1];
-        results = QueryPlan.executeAndBGP(bgpa,bgpb, dataset, queryEngine, queryEnv);
-        if(results!=null) {
-            acum.push(results);
-
-        } else {
-            return null;
-        }
+    for(var groupId in groups) {
+        acum.push(groups[groupId]);
     }
-    return QueryPlan.buildBushyJoinTreeBranches(acum);
+
+    return acum;
 };
 
-// @todo
-// remove recursion here
-QueryPlan.buildBushyJoinTreeBranches = function(bindingsList) {
-    if(bindingsList.length === 1){
-        return bindingsList[0];
-    } else {
-        var pairs = Utils.partition(bindingsList,2);
-        var acum = [];
-        for(var i=0; i<pairs.length; i++) {
-            var pair = pairs[i];
-            var bindingsa = pair[0];
-            var bindingsb = pair[1];
-            var result =  QueryPlan.executeAndBindings(bindingsa, bindingsb);
-            acum.push(result);
+// @modified dp
+QueryPlanDPSize.intersectionSize = function(leftPlan, rightPlan) {
+    var idsRight = rightPlan.i.split("_");
+    for(var i=0; i<idsRight.length; i++) {
+        if(idsRight[i]=="")
+            continue;
+        if(leftPlan.i.indexOf('_'+idsRight[i]+'_') != -1) {
+            return 1; // we just need to know if this value is >0
         }
-        return QueryPlan.buildBushyJoinTreeBranches(acum);
     }
+    return 0;
 };
 
-QueryPlan.executeAndBindings = function(bindingsa, bindingsb) {
-    if(bindingsa==null) {
-        return bindingsb;
-    } else if(bindingsb==null) {
-        return bindingsa;
-    } else {
-        if(bindingsa==[] || bindingsb==[]) {
-            return [];
-        } else {
-            if(QueryPlan.variablesIntersectionBindings(bindingsa[0],bindingsb[0]).length == 0) {
-                return QueryPlan.crossProductBindings(bindingsa,bindingsb);
+// @modified dp
+QueryPlanDPSize.createJoinTree = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    var acumVars = leftPlan.vars.concat([]);
+    var join = [];
+
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            if(rightPlan.vars[i].indexOf("_:") == 0) {
+                join.push("blank:"+rightPlan.vars[i]);
             } else {
-                return QueryPlan.joinBindings(bindingsa,bindingsb);
+                join.push(rightPlan.vars[i]);
+            }
+        } else {
+            acumVars.push(rightPlan.vars[i]);
+        }
+    }
+
+    var rightIds = rightPlan.i.split("_");
+    var leftIds = leftPlan.i.split("_");
+    var distinct = {};
+    for(var i=0; i<rightIds.length; i++) {
+        if(rightIds[i] != "") {
+            distinct[rightIds[i]] = true;
+        }
+    }
+    for(var i=0; i<leftIds.length; i++) {
+        if(leftIds[i] != "") {
+            distinct[leftIds[i]] = true;
+        }
+    }
+    var ids = [];
+    for(var id in distinct) {
+        ids.push(id);
+    }
+
+    // new join tree
+    return {
+        left: leftPlan,
+        right: rightPlan,
+        cost: leftPlan.cost+rightPlan.cost,
+        i: "_"+(ids.sort().join("_"))+"_",
+        vars: acumVars,
+        join: join
+    };
+};
+
+// @modified dp
+QueryPlanDPSize.executeBushyTree = function(treeNode, dataset, queryEngine, env) {
+    if(treeNode.left == null ) {
+        //console.log("*** join empty left"+treeNode.i);
+        //console.log(treeNode);
+        return QueryPlanDPSize.executeEmptyJoinBGP(treeNode.right, dataset, queryEngine, env);
+    } else if(treeNode.right == null) {
+        //console.log("*** executing left empty join "+treeNode.i);
+        //console.log(treeNode);
+        return QueryPlanDPSize.executeEmptyJoinBGP(treeNode.left, dataset, queryEngine, env);
+    } else {
+        //console.log("*** executing left:"+treeNode.i);
+        //console.log(treeNode.left);
+        var resultsLeft = QueryPlanDPSize.executeBushyTree(treeNode.left, dataset, queryEngine, env);
+        //console.log("-left:");
+        //console.log(success);
+        //console.log(resultsLeft);
+
+        if(resultsLeft!=null) {
+            //console.log("*** executing right:"+treeNode.i);
+            //console.log(treeNode.right);
+            var resultsRight = QueryPlanDPSize.executeBushyTree(treeNode.right, dataset, queryEngine, env);
+            //console.log("-right:");
+            //console.log(success);
+            //console.log(resultsRight);
+            if(resultsRight!=null) {
+                //var joinVars = QueryPlanDPSize.variablesIntersectionBGP(treeNode.left,treeNode.right);
+                //console.log("*** BACK executing right -> "+treeNode.i);
+                //console.log("**  left:");
+                //console.log(resultsLeft);
+                //console.log("**  right:");
+                //console.log(resultsRight);
+                //console.log("JOINING...");
+                //console.log(resultsLeft);
+                //console.log(resultsRight);
+                //console.log("--------------");
+                var bindings = QueryPlanDPSize.joinBindings2(treeNode.join, resultsLeft, resultsRight);
+                //var bindings = QueryPlanDPSize.joinBindings(resultsLeft, resultsRight);
+                //console.log(bindings);
+                return bindings;
+            } else {
+                return null
             }
         }
     }
 };
 
-QueryPlan.executeAndBGP = function(bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    if(bgpa==null) {
-        return QueryPlan.executeEmptyJoinBGP(bgpb, dataset, queryEngine, queryEnv);
-    } else if(bgpb==null) {
-        return QueryPlan.executeEmptyJoinBGP(bgpa, dataset, queryEngine, queryEnv);
-    } else {
-        var joinVars = QueryPlan.variablesIntersectionBGP(bgpa,bgpb);
-        if(joinVars.length === 0) {
-            // range a, range b -> cartesian product
-            return QueryPlan.executeCrossProductBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv);
-        } else {
-            // join on intersection vars
-            return QueryPlan.executeJoinBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv);
+
+//@modified dp
+QueryPlanDPSize.executeAndBGPsDPSize = function(allBgps, dataset, queryEngine, env) {
+    var groups = QueryPlanDPSize.executeAndBGPsGroups(allBgps);
+    var groupResults = [];
+    for(var g=0; g<groups.length; g++) {
+
+        // Build bushy tree for this group
+        var bgps = groups[g];
+        //console.log("NEW GROUP!!");
+        //console.log(bgps);
+        var costFactor = 1;
+        bgpas = queryEngine.computeCosts(bgps,env);
+
+        //console.log("COMPUTED COSTS:");
+        //console.log(bgps);
+
+        var bestPlans = {};
+        var plans = {};
+        var sizes = {};
+
+        var maxSize = 1;
+        var maxPlan = null;
+
+        var cache = {};
+        
+        sizes['1'] = [];
+
+        // Building plans of size 1
+        for(var i=0; i<bgps.length; i++) {
+            var vars = [];
+            for(var comp in bgps[i]) {
+                if(comp != '_cost') {
+                    if(bgps[i][comp].token === 'var') {
+                        vars.push(bgps[i][comp].value)
+                    } else if(bgps[i][comp].token === 'blank') {
+                        vars.push(bgps[i][comp].label)
+                    }
+                }
+            }
+            //console.log("VARS:");
+            //console.log(vars);
+            plans["_"+i+"_"] = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+            var plan = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+            bestPlans["_"+i+"_"] = plan;
+            delete bgps[i]['_cost'];
+            cache["_"+i+"_"] = true;
+            sizes['1'].push("_"+i+"_");
+            if(maxPlan == null || maxPlan.cost>plan.cost) {
+                maxPlan = plan;
+            }
         }
-    }
-};
 
-QueryPlan.executeEmptyJoinBGP = function(bgp, dataset, queryEngine, queryEnv) {
-    return QueryPlan.executeBGPDatasets(bgp, dataset, queryEngine, queryEnv);
-};
+        //console.log("BEST PLANS");
+        //console.log(bestPlans);
+        
+        // dynamic programming -> build plans of increasing size
+        for(var s=2; s<=bgps.length; s++) { // size
+            //console.log("\n\n\n*********************ITERATION");
+            //console.log(s);
+            for(var sl=1; sl<s; sl++) { // size left plan
+                var sr = s - sl; // size right plan
+                //console.log("SL:"+sl);
+                //console.log("SR:"+sr);
+                var leftPlans = sizes[''+sl] || [];
+                var rightPlans = sizes[''+sr] || [];
+                //console.log("LEFT PLANS");
+                //console.log(leftPlans);
+                //console.log("RIGHT PLANS");
+                //console.log(rightPlans);
+                for(var i=0; i<leftPlans.length; i++) {
+                    for(var j=0; j<rightPlans.length; j++) {
+                        if(leftPlans[i]===rightPlans[j])
+                            continue;
+                        var leftPlan = plans[leftPlans[i]];
+                        var rightPlan = plans[rightPlans[j]];
+                        //console.log("LEFT PLAN");
+                        //console.log(leftPlan);
+                        //console.log("RIGHT PLAN");
+                        //console.log(rightPlan);
+                        //console.log("INTERSECTION");
+                        //console.log(QueryPlanDPSize.intersectionSize(leftPlan, rightPlan));
 
-QueryPlan.executeJoinBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    var bindingsa = QueryPlan.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv);
-    if(bindingsa!=null) {
-        var bindingsb = QueryPlan.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv);
-        if(bindingsb!=null) {
-            return QueryPlan.joinBindings(bindingsa, bindingsb);
-        } else {
-            return null;
+                        // condition (1)
+                        if(QueryPlanDPSize.intersectionSize(leftPlan, rightPlan) == 0) {
+                            // condition (2)
+
+                            //console.log("CONNECTED");
+                            //console.log(QueryPlanDPSize.connected(leftPlan,rightPlan));
+                            if(QueryPlanDPSize.connected(leftPlan,rightPlan)) {
+                                maxSize = s;
+                                var p1 = bestPlans[leftPlan.i];  //QueryPlanDPSize.bestPlan(leftPlan, bestPlans);
+                                var p2 = bestPlans[rightPlan.i]; //QueryPlanDPSize.bestPlan(rightPlan, bestPlans);
+
+                                //console.log("P1");
+                                //console.log(p1);
+                                //console.log("P2");
+                                //console.log(p2);
+                                var currPlan = QueryPlanDPSize.createJoinTree(p1,p2);
+                                if(!cache[currPlan.i]) {
+                                    cache[currPlan.i] = true;
+                                    //console.log("CURR PLAN");
+                                    //console.log(currPlan);
+                                    var costUnion = currPlan.cost+1;
+                                    if(bestPlans[currPlan.i] != null) {
+                                        costUnion = bestPlans[currPlan.i].cost;
+                                    }
+                                    
+                                    var acum = sizes[s] || [];
+                                    acum.push(currPlan.i);
+                                    plans[currPlan.i] = currPlan;
+                                    sizes[s] = acum;
+                                    
+                                    //console.log("COST UNION");
+                                    //console.log(costUnion);
+                                    if(costUnion > currPlan.cost) {
+                                        if(maxSize === s) {
+                                            maxPlan = currPlan;
+                                        }
+                                        bestPlans[currPlan.i] = currPlan;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-    } else {
-        return null;
+
+        //console.log(sizes);
+        
+        //console.log("==== FOUND ===");
+        //console.log(maxPlan);
+        groupResults.push(maxPlan);
     }
+
+
+    // now execute the Bushy trees and perform
+    // cross products between groups
+    var acum = null;
+
+    for(var g=0; g<groupResults.length; g++) {
+        var tree = groupResults[g];
+        var result = QueryPlanDPSize.executeBushyTree(tree, dataset, queryEngine, env);
+        if(acum == null) {
+            acum = result;
+        } else {
+            acum = QueryPlanDPSize.crossProductBindings(acum, result);
+        }
+    };
+
+    return acum;
 };
 
-QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
+// @modified dp
+QueryPlanDPSize.executeEmptyJoinBGP = function(bgp, dataset, queryEngine, queryEnv) {
+    return QueryPlanDPSize.executeBGPDatasets(bgp, dataset, queryEngine, queryEnv);
+};
+
+
+// @mofidified dp
+QueryPlanDPSize.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
     // avoid duplicate queries in the same graph
     // merge of graphs is not guaranted here.
     var duplicates = {};
@@ -36572,11 +37137,11 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
                 duplicates[dataset['default'][i].oid] = true;
                 bgp.graph = dataset['default'][i];//.oid
                 var results = queryEngine.rangeQuery(bgp, queryEnv);
-                results = QueryPlan.buildBindingsFromRange(results, bgp);
+                results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
                 acum.push(results);
             }
         }
-        var acumBindings = QueryPlan.unionManyBindings(acum);
+        var acumBindings = QueryPlanDPSize.unionManyBindings(acum);
         return acumBindings;
     } else if(bgp.graph.token === 'var') {
         // union through all named datasets
@@ -36590,7 +37155,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
                 
                 var results = queryEngine.rangeQuery(bgp, queryEnv);
                 if(results != null) {
-                    results = QueryPlan.buildBindingsFromRange(results, bgp);
+                    results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
                     // add the graph bound variable to the result 
                     for(var j=0; j< results.length; j++) {
                         results[j][graphVar] = dataset.named[i].oid;
@@ -36602,7 +37167,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
             }
         }
         
-        var acumBindings = QueryPlan.unionManyBindings(acum||[]);
+        var acumBindings = QueryPlanDPSize.unionManyBindings(acum||[]);
         return acumBindings;
 
     } else {
@@ -36610,7 +37175,7 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
         // Filtering the results will still be necessary
         var results = queryEngine.rangeQuery(bgp, queryEnv);
         if(results!=null) {
-            results = QueryPlan.buildBindingsFromRange(results, bgp);
+            results = QueryPlanDPSize.buildBindingsFromRange(results, bgp);
             return results;
         } else {
             return null;
@@ -36618,22 +37183,9 @@ QueryPlan.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv) {
     }
 };
 
-QueryPlan.executeCrossProductBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv) {
-    var bindingsa = QueryPlan.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv);
-    if(bindingsa!=null) {
-        var bindingsb = QueryPlan.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv);
-        if(bindingsb!=null) {
-            return QueryPlan.crossProductBindings(bindingsa, bindingsb);
-        } else {
-            return null;
-        }
-    } else {
-        return null;
-    }
-};
-
-QueryPlan.buildBindingsFromRange = function(results, bgp) {
-    var variables = QueryPlan.variablesInBGP(bgp);
+// @used
+QueryPlanDPSize.buildBindingsFromRange = function(results, bgp) {
+    var variables = QueryPlanDPSize.variablesInBGP(bgp);
     var bindings = {};
 
     var components =  bgp.value||bgp;
@@ -36663,7 +37215,837 @@ QueryPlan.buildBindingsFromRange = function(results, bgp) {
     return resultsBindings;
 };
 
-QueryPlan.variablesIntersectionBindings = function(bindingsa, bindingsb) {
+
+// @used
+QueryPlanDPSize.areCompatibleBindings = function(bindingsa, bindingsb) {
+    for(var variable in bindingsa) {
+        if(bindingsb[variable]!=null && (bindingsb[variable] != bindingsa[variable])) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+
+// @used
+QueryPlanDPSize.mergeBindings = function(bindingsa, bindingsb) {
+    var merged = {};
+    for(var variable in bindingsa) {
+        merged[variable] = bindingsa[variable];
+    }
+
+    for(var variable in bindingsb) {
+        merged[variable] = bindingsb[variable];
+    }
+
+    return merged;
+};
+
+QueryPlanDPSize.joinBindings2 = function(bindingVars, bindingsa, bindingsb) {
+    var acum = {};
+    var bindings, variable, variableValue, values, tmp;
+    var joined = [];
+
+    for(var i=0; i<bindingsa.length; i++) {
+        bindings = bindingsa[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+            if(j == bindingVars.length-1) {
+                values = tmp[variableValue] || [];
+                values.push(bindings);
+                tmp[variableValue] = values;
+            } else {
+                values = tmp[variableValue] || {};
+                tmp[variableValue] = values;
+                tmp = values;
+            }
+        }
+    }
+
+    for(var i=0; i<bindingsb.length; i++) {
+        bindings = bindingsb[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+
+            if(tmp[variableValue] != null) {
+                if(j == bindingVars.length-1) {
+                    for(var k=0; k<tmp[variableValue].length; k++) {
+                        joined.push(QueryPlanDPSize.mergeBindings(tmp[variableValue][k],bindings));
+                    }
+                } else {
+                    tmp = tmp[variableValue];
+                }
+            } else {
+                continue;
+            }
+        }
+    }
+
+    return joined;
+};
+
+// @used
+QueryPlanDPSize.joinBindings = function(bindingsa, bindingsb) {
+    var result = [];
+
+    for(var i=0; i< bindingsa.length; i++) {
+        var bindinga = bindingsa[i];
+        for(var j=0; j<bindingsb.length; j++) {
+            var bindingb = bindingsb[j];
+            if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
+                result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
+            }
+        }
+    }
+
+    return result;
+};
+
+// @used
+QueryPlanDPSize.augmentMissingBindings = function(bindinga, bindingb) {
+    for(var pb in bindingb) {
+        if(bindinga[pb] == null) {
+            bindinga[pb] = null
+        }
+    }
+    return bindinga;
+};
+
+/*
+  QueryPlanDPSize.diff = function(bindingsa, biundingsb) {
+  var result = [];
+
+  for(var i=0; i< bindingsa.length; i++) {
+  var bindinga = bindingsa[i];
+  var matched = false;
+  for(var j=0; j<bindingsb.length; j++) {
+  var bindingb = bindingsb[j];
+  if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
+  matched = true;
+  result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
+  }
+  }
+  if(matched === false) {
+  // missing bindings must be present for further processing
+  // e.g. filtering by not present value (see DAWG tests
+  // bev-6)
+  QueryPlanDPSize.augmentMissingBindings(bindinga, bindingb);
+  result.push(bindinga);
+  }
+  }
+
+  return result;    
+  };
+*/
+
+// @used
+QueryPlanDPSize.leftOuterJoinBindings = function(bindingsa, bindingsb) {
+    var result = [];
+
+    for(var i=0; i< bindingsa.length; i++) {
+        var bindinga = bindingsa[i];
+        var matched = false;
+        for(var j=0; j<bindingsb.length; j++) {
+            var bindingb = bindingsb[j];
+            if(QueryPlanDPSize.areCompatibleBindings(bindinga, bindingb)){
+                matched = true;
+                result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
+            }
+        }
+        if(matched === false) {
+            // missing bindings must be present for further processing
+            // e.g. filtering by not present value (see DAWG tests
+            // bev-6)
+            // augmentMissingBindings set their value to null.
+            QueryPlanDPSize.augmentMissingBindings(bindinga, bindingb);
+            result.push(bindinga);
+        }
+    }
+
+    return result;
+};
+
+// @modified dp
+QueryPlanDPSize.crossProductBindings = function(bindingsa, bindingsb) {
+    var result = [];
+
+    for(var i=0; i< bindingsa.length; i++) {
+        var bindinga = bindingsa[i];
+        for(var j=0; j<bindingsb.length; j++) {
+            var bindingb = bindingsb[j];
+            result.push(QueryPlanDPSize.mergeBindings(bindinga, bindingb));
+        }
+    }
+
+    return result;
+};
+
+// @used
+QueryPlanDPSize.unionBindings = function(bindingsa, bindingsb) {
+    return bindingsa.concat(bindingsb);
+};
+
+// @used
+QueryPlanDPSize.unionManyBindings = function(bindingLists) {
+    var acum = [];
+    for(var i=0; i<bindingLists.length; i++) {
+        var bindings = bindingLists[i];
+        acum = QueryPlanDPSize.unionBindings(acum, bindings);
+    }
+
+    return acum;
+};
+
+// end of ./src/js-query-engine/src/query_plan_sync_dpsize.js 
+// exports
+var QueryPlanAsync = {};
+
+// imports
+
+QueryPlanAsync.variablesInBGP = function(bgp) {
+    // may be cached in the pattern
+    var variables = bgp.variables;
+    if(variables) {
+        return variables;
+    }
+
+    var components =  bgp.value || bgp;
+    var variables  = [];
+    for(comp in components) {
+        if(components[comp] && components[comp].token === "var") {
+            variables.push(components[comp].value);
+        } else if(components[comp] && components[comp].token === "blank") {
+            variables.push("blank:"+components[comp].label);
+        }
+    }
+    bgp.variables = variables;
+
+    return variables;
+};
+
+QueryPlanAsync.variablesIntersectionBGP = function(bgpa, bgpb) {
+    var varsa = QueryPlanAsync.variablesInBGP(bgpa).sort();
+    var varsb = QueryPlanAsync.variablesInBGP(bgpb).sort();
+
+    var ia = 0;
+    var ib = 0;
+
+    var intersection = [];
+
+    while(ia<varsa.length && ib<varsb.length) {
+        if(varsa[ia] === varsb[ib]) {
+            intersection.push(varsa[ia]);
+            ia++;
+            ib++;
+        } else if(varsa[ia] < varsb[ib]) {
+            ia++;
+        } else {
+            ib++;
+        }
+    }
+
+    return intersection;
+};
+
+QueryPlanAsync.executeAndBGPs = function(bgps, dataset, queryEngine, env, callback) {
+    //for(var i=0; i<bgps.length; i++) {
+    //    if(bgps[i].graph == null) {
+    //        bgps[i].graph = dataset;
+    //    } else if(dataset != null && dataset.length != 0) {
+    //        bgps[i].graph = dataset;
+    //    }
+    //}
+ 
+    var pairs = Utils.partition(bgps,2);
+ 
+    QueryPlanAsync.buildBushyJoinTreeBase(pairs, dataset, queryEngine, env, function(success, results){
+        if(success) {
+            callback(true, results);
+        } else {
+            callback(false, results);
+        }
+    });
+};
+
+// @modified qp
+QueryPlanAsync.intersectionSize = function(leftPlan, rightPlan) {
+    var idsRight = rightPlan.i.split("_");
+    for(var i=0; i<idsRight.length; i++) {
+        if(idsRight[i]=="")
+            continue;
+        if(leftPlan.i.indexOf('_'+idsRight[i]+'_') != -1) {
+            return 1; // we just need to know if this value is >0
+        }
+    }
+    return 0;
+};
+
+QueryPlanAsync.connected = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+QueryPlanAsync.createJoinTree = function(leftPlan, rightPlan) {
+    var varsLeft ="/"+leftPlan.vars.join("/")+"/";
+    var acumVars = leftPlan.vars.concat([]);
+    var join = [];
+
+    for(var i=0; i<rightPlan.vars.length; i++) {
+        if(varsLeft.indexOf("/"+rightPlan.vars[i]+"/") != -1) {
+            join.push(rightPlan.vars[i]);
+        } else {
+            acumVars.push(rightPlan.vars[i]);
+        }
+    }
+
+    var rightIds = rightPlan.i.split("_");
+    var leftIds = leftPlan.i.split("_");
+    var distinct = {};
+    for(var i=0; i<rightIds.length; i++) {
+        if(rightIds[i] != "") {
+            distinct[rightIds[i]] = true;
+        }
+    }
+    for(var i=0; i<leftIds.length; i++) {
+        if(leftIds[i] != "") {
+            distinct[leftIds[i]] = true;
+        }
+    }
+    var ids = [];
+    for(var id in distinct) {
+        ids.push(id);
+    }
+
+    // new join tree
+    return {
+        left: leftPlan,
+        right: rightPlan,
+        cost: leftPlan.cost+rightPlan.cost,
+        i: "_"+(ids.sort().join("_"))+"_",
+        vars: acumVars,
+        join: join
+    };
+};
+
+// @modified qp
+/**
+ * All BGPs sharing variables are grouped together.
+ */
+QueryPlanAsync.executeAndBGPsGroups = function(bgps) {
+    var groups = {};
+    var groupVars = {};
+    var groupId = 0;
+    for(var i=0; i<bgps.length; i++) {
+        var bgp = bgps[i];
+
+        var vars = [];
+        for(var comp in bgp) {
+            if(comp != '_cost') {
+                if(bgp[comp].token === 'var') {
+                    vars.push(bgp[comp].value)
+                } else if(bgp[comp].token === 'blank') {
+                    vars.push(bgp[comp].label);
+                }
+            }
+        }
+
+        var foundGroup = false;
+        for(var nextGroupId in groupVars) {
+            groupVar = groupVars[nextGroupId];
+            for(var j=0; j<vars.length; j++) {
+                var thisVar = "/"+vars[j]+"/";
+                if(groupVar.indexOf(thisVar) != -1) {
+                    groups[nextGroupId].push(bgp);
+                    groupVars[nextGroupId] = groupVar+(vars.join("/"))+"/"
+                    foundGroup = true;
+                    break;
+                }
+            }
+            if(foundGroup)
+                break;
+        }
+        if(!foundGroup) {
+            groups[groupId] = [bgp];
+            groupVars[groupId] = "/"+(vars.join("/"))+"/";
+            groupId++;
+        }
+    }
+
+    var acum = [];
+    for(var groupId in groups) {
+        acum.push(groups[groupId]);
+    }
+
+    return acum;
+};
+
+// @modified qp
+QueryPlanAsync.executeBushyTree = function(treeNode, dataset, queryEngine, env, callback) {
+    if(treeNode.left == null ) {
+        //console.log("*** join empty left"+treeNode.i);
+        //console.log(treeNode);
+        QueryPlanAsync.executeEmptyJoinBGP(treeNode.right, dataset, queryEngine, env, callback);
+    } else if(treeNode.right == null) {
+        //console.log("*** executing left empty join "+treeNode.i);
+        //console.log(treeNode);
+        QueryPlanAsync.executeEmptyJoinBGP(treeNode.left, dataset, queryEngine, env, callback);
+    } else {
+        //console.log("*** executing left:"+treeNode.i);
+        //console.log(treeNode.left);
+        QueryPlanAsync.executeBushyTree(treeNode.left, dataset, queryEngine, env, function(success, resultsLeft) {
+            //console.log("-left:");
+            //console.log(success);
+            //console.log(resultsLeft);
+
+            if(success) {
+                //console.log("*** executing right:"+treeNode.i);
+                //console.log(treeNode.right);
+                QueryPlanAsync.executeBushyTree(treeNode.right, dataset, queryEngine, env, function(success, resultsRight) {
+                    //console.log("-right:");
+                    //console.log(success);
+                    //console.log(resultsRight);
+                    if(success) {
+                        //var joinVars = QueryPlanAsync.variablesIntersectionBGP(treeNode.left,treeNode.right);
+                        //console.log("*** BACK executing right -> "+treeNode.i);
+                        //console.log("**  left:");
+                        //console.log(resultsLeft);
+                        //console.log("**  right:");
+                        //console.log(resultsRight);
+                        var bindings = QueryPlanAsync.joinBindings2(treeNode.join, resultsLeft, resultsRight);
+                        callback(true, bindings);
+                    } else {
+                        callback(false, null);
+                    }
+                })
+            } else {
+                callback(false, null);
+            }
+        });
+    }
+};
+
+// @modified qp
+QueryPlanAsync.executeAndBGPsDPSize = function(allBgps, dataset, queryEngine, env, callback) {
+
+    var groups = QueryPlanAsync.executeAndBGPsGroups(allBgps);
+    var groupResults = [];
+
+    Utils.repeat(0,groups.length,function(k,kenv) {
+        // @todo
+        // this lambda function should be moved to its named function
+        //console.log("\n\n\n*************************");
+        //console.log("***********  NEW GROUP  **********");
+        //console.log("*************************\n\n\n");
+
+        // Build bushy tree for this group
+        var bgps = groups[kenv._i];
+        //console.log(bgps);
+        var floop = arguments.callee;
+        var costFactor = 1;
+        queryEngine.computeCosts(bgps,env,function(bgps) {
+            //console.log("COMPUTED COSTS:");
+            //console.log(bgps);
+
+            var bestPlans = {};
+            var plans = {};
+            var sizes = {};
+
+            var maxSize = 1;
+            var maxPlan = null;
+
+            var cache = {};
+            
+            sizes['1'] = [];
+
+            // Building plans of size 1
+            for(var i=0; i<bgps.length; i++) {
+                var vars = [];
+                for(var comp in bgps[i]) {
+                    if(comp != '_cost') {
+                        if(bgps[i][comp].token === 'var') {
+                            vars.push(bgps[i][comp].value)
+                        } else if(bgps[i][comp].token === 'blank') {
+                            vars.push(bgps[i][comp].label)
+                        }
+                    }
+                }
+                //console.log("VARS:");
+                //console.log(vars);
+                plans["_"+i+"_"] = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+                var plan = {left: bgps[i], right:null, cost:bgps[i]._cost, i:('_'+i+'_'), vars:vars};
+                bestPlans["_"+i+"_"] = plan;
+                delete bgps[i]['_cost'];
+                cache["_"+i+"_"] = true;
+                sizes['1'].push("_"+i+"_");
+                if(maxPlan == null || maxPlan.cost>plan.cost) {
+                    maxPlan = plan;
+                }
+            }
+
+            //console.log("BEST PLANS");
+            //console.log(bestPlans);
+            
+            // dynamic programming -> build plans of increasing size
+            for(var s=2; s<=bgps.length; s++) { // size
+                //console.log("\n\n\n*********************ITERATION");
+                //console.log(s);
+                for(var sl=1; sl<s; sl++) { // size left plan
+                    var sr = s - sl; // size right plan
+                    //console.log("SL:"+sl);
+                    //console.log("SR:"+sr);
+                    var leftPlans = sizes[''+sl] || [];
+                    var rightPlans = sizes[''+sr] || [];
+                    //console.log("LEFT PLANS");
+                    //console.log(leftPlans);
+                    //console.log("RIGHT PLANS");
+                    //console.log(rightPlans);
+                    for(var i=0; i<leftPlans.length; i++) {
+                        for(var j=0; j<rightPlans.length; j++) {
+                            if(leftPlans[i]===rightPlans[j])
+                                continue;
+                            var leftPlan = plans[leftPlans[i]];
+                            var rightPlan = plans[rightPlans[j]];
+                            //console.log("LEFT PLAN");
+                            //console.log(leftPlan);
+                            //console.log("RIGHT PLAN");
+                            //console.log(rightPlan);
+                            //console.log("INTERSECTION");
+                            //console.log(QueryPlanAsync.intersectionSize(leftPlan, rightPlan));
+
+                            // condition (1)
+                            if(QueryPlanAsync.intersectionSize(leftPlan, rightPlan) == 0) {
+                                // condition (2)
+
+                                //console.log("CONNECTED");
+                                //console.log(QueryPlanAsync.connected(leftPlan,rightPlan));
+                                if(QueryPlanAsync.connected(leftPlan,rightPlan)) {
+                                    maxSize = s;
+                                    var p1 = bestPlans[leftPlan.i];  //QueryPlanAsync.bestPlan(leftPlan, bestPlans);
+                                    var p2 = bestPlans[rightPlan.i]; //QueryPlanAsync.bestPlan(rightPlan, bestPlans);
+
+                                    //console.log("P1");
+                                    //console.log(p1);
+                                    //console.log("P2");
+                                    //console.log(p2);
+                                    var currPlan = QueryPlanAsync.createJoinTree(p1,p2);
+                                    if(!cache[currPlan.i]) {
+                                        cache[currPlan.i] = true;
+                                        //console.log("CURR PLAN");
+                                        //console.log(currPlan);
+                                        var costUnion = currPlan.cost+1;
+                                        if(bestPlans[currPlan.i] != null) {
+                                            costUnion = bestPlans[currPlan.i].cost;
+                                        }
+                                        
+                                        var acum = sizes[s] || [];
+                                        acum.push(currPlan.i);
+                                        plans[currPlan.i] = currPlan;
+                                        sizes[s] = acum;
+                                        
+                                        //console.log("COST UNION");
+                                        //console.log(costUnion);
+                                        if(costUnion > currPlan.cost) {
+                                            if(maxSize === s) {
+                                                maxPlan = currPlan;
+                                            }
+                                            bestPlans[currPlan.i] = currPlan;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            //console.log(sizes);
+            
+            //console.log("==== FOUND ===");
+            //console.log(maxPlan);
+            groupResults.push(maxPlan);
+            k(floop,kenv);
+        });
+    },function(kenv) {
+        // now execute the Bushy trees and perform
+        // cross products between groups
+        var acum = null;
+
+        Utils.repeat(0, groupResults.length, function(k, kenv) {
+
+            var tree = groupResults[kenv._i];
+            var floop = arguments.callee;
+           
+            QueryPlanAsync.executeBushyTree(tree, dataset, queryEngine, env, function(success, result) {
+                if(success) {
+                    if(acum == null) {
+                        acum = result;
+                        k(floop,kenv);
+                    } else {
+                        acum = QueryPlanAsync.crossProductBindings(acum, result);
+                        k(floop,kenv);
+                    }
+                } else {
+                    callback(false, null);
+                }
+            
+            });
+        },function(kenv){
+            callback(true, acum);
+        });
+    });
+};
+
+QueryPlanAsync.buildBushyJoinTreeBase = function(pairs, dataset, queryEngine, queryEnv, callback) {
+    var that = this;
+    Utils.repeat(0, pairs.length, function(k, env) {
+        var floop = arguments.callee;
+        var pair = pairs[env._i];
+        var bgpa = pair[0];
+        var bgpb = pair[1];
+        QueryPlanAsync.executeAndBGP(bgpa,bgpb, dataset, queryEngine, queryEnv, function(success, results){
+            if(success) {
+                if(env.acum == null) {
+                    env.acum = [];
+                }
+                env.acum.push(results);
+
+                k(floop, env);
+            } else {
+                callback(success,results);
+            }
+        });
+    }, function(env){
+        QueryPlanAsync.buildBushyJoinTreeBranches(env.acum, callback);
+    });
+};
+
+QueryPlanAsync.buildBushyJoinTreeBranches = function(bindingsList, callback) {
+    var that = this;
+    if(bindingsList.length == 1){
+        callback(true, bindingsList[0]);
+    } else {
+        var pairs = Utils.partition(bindingsList,2);
+        var acum = [];
+        for(var i=0; i<pairs.length; i++) {
+            var pair = pairs[i];
+            var bindingsa = pair[0];
+            var bindingsb = pair[1];
+            var result =  QueryPlanAsync.executeAndBindings(bindingsa, bindingsb);
+            acum.push(result);
+        }
+        QueryPlanAsync.buildBushyJoinTreeBranches(acum, callback);
+    }
+};
+
+QueryPlanAsync.executeAndBindings = function(bindingsa, bindingsb) {
+    if(bindingsa==null) {
+        return bindingsb;
+    } else if(bindingsb==null) {
+        return bindingsa;
+    } else {
+        if(bindingsa==[] || bindingsb==[]) {
+            return [];
+        } else {
+            if(QueryPlanAsync.variablesIntersectionBindings(bindingsa[0],bindingsb[0]).length == 0) {
+                return QueryPlanAsync.crossProductBindings(bindingsa,bindingsb);
+            } else {
+                return QueryPlanAsync.joinBindings(bindingsa,bindingsb);
+            }
+        }
+    }
+};
+
+QueryPlanAsync.executeAndBGP = function(bgpa, bgpb, dataset, queryEngine, queryEnv, callback) {
+    if(bgpa==null) {
+        QueryPlanAsync.executeEmptyJoinBGP(bgpb, dataset, queryEngine, queryEnv, callback);
+    } else if(bgpb==null) {
+        QueryPlanAsync.executeEmptyJoinBGP(bgpa, dataset, queryEngine, queryEnv, callback);
+    } else {
+        var joinVars = QueryPlanAsync.variablesIntersectionBGP(bgpa,bgpb);
+        if(joinVars.length === 0) {
+            // range a, range b -> cartesian product
+            QueryPlanAsync.executeCrossProductBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv, callback);
+        } else {
+            // join on intersection vars
+            QueryPlanAsync.executeJoinBGP(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv, callback);
+        }
+    }
+};
+
+QueryPlanAsync.executeEmptyJoinBGP = function(bgp, dataset, queryEngine, queryEnv, callback) {
+    //console.log("EMPTY JOIN");
+    //console.log(bgp);
+    QueryPlanAsync.executeBGPDatasets(bgp, dataset, queryEngine, queryEnv, function(success, bindings){
+        //console.log("EMPTY JOIN RESULTS:");
+        //console.log(success);
+        //console.log(bindings);
+        if(success == true) {
+            callback(true, bindings);
+        } else {
+            callback(false, bindings);
+        }
+    });
+};
+
+QueryPlanAsync.executeJoinBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv, callback) {
+    QueryPlanAsync.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv, function(success, bindingsa){
+        if(success) {
+            QueryPlanAsync.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv, function(success, bindingsb){
+                if(success) {
+                    //queryEngine.copyDenormalizedBindings(bindingsa, queryEnv.outCache||[], function(success, denormBindingsa){
+                        //var bindingsb = QueryPlanAsync.buildBindingsFromRange(resultsb, bgpb);
+                        //queryEngine.copyDenormalizedBindings(bindingsb, queryEnv.outCache||[], function(success, denormBindingsb){
+                            var bindings = QueryPlanAsync.joinBindings(bindingsa, bindingsb);
+                            callback(true, bindings);
+                        //});
+                    //});
+                } else {
+                    callback(false, results);
+                }
+            });
+        } else {
+            callback(false, results);
+        }
+    });
+};
+
+QueryPlanAsync.executeBGPDatasets = function(bgp, dataset, queryEngine, queryEnv,callback) {
+    // avoid duplicate queries in the same graph
+    // merge of graphs is not guaranted here.
+    var duplicates = {};
+
+    if(bgp.graph == null) {
+        //union through all default graph(s)
+        Utils.repeat(0, dataset['default'].length, function(k, env) {
+            var floop = arguments.callee;
+            if(duplicates[dataset['default'][env._i].oid] == null) {
+                duplicates[dataset['default'][env._i].oid] = true;
+                env.acum = env.acum || [];
+                bgp.graph = dataset['default'][env._i];//.oid
+                queryEngine.rangeQuery(bgp, queryEnv, function(succes, results){
+                    if(results != null) {
+                        results = QueryPlanAsync.buildBindingsFromRange(results, bgp);
+                        env.acum.push(results);
+                        k(floop, env);
+                    } else {
+                        k(floop, env);              
+                    }
+                });
+            } else {
+                k(floop, env);
+            }
+        }, function(env){
+            var acumBindings = QueryPlanAsync.unionManyBindings(env.acum||[]);
+            callback(true, acumBindings);
+        });
+    } else if(bgp.graph.token === 'var') {
+        var graphVar = bgp.graph.value;
+        
+        // union through all named datasets
+        Utils.repeat(0, dataset.named.length, function(k, env) {
+            var floop = arguments.callee;
+            if(duplicates[dataset.named[env._i].oid] == null) {
+                duplicates[dataset.named[env._i].oid] = true;
+                env.acum = env.acum || [];
+                bgp.graph = dataset.named[env._i];//.oid
+                 
+                queryEngine.rangeQuery(bgp, queryEnv, function(success, results) {
+                    if(results != null) {
+                        results = QueryPlanAsync.buildBindingsFromRange(results, bgp);
+                        // add the graph bound variable to the result 
+                        for(var i=0; i< results.length; i++) {
+                            results[i][graphVar] = dataset.named[env._i].oid;
+                        }
+                        env.acum.push(results);
+                        k(floop, env);
+                    } else {
+                        callback(false, results);
+                    }
+                });
+            } else {
+                k(floop, env);
+            }
+        }, function(env){
+            var acumBindings = QueryPlanAsync.unionManyBindings(env.acum||[]);
+            callback(true, acumBindings);
+        });
+
+    } else {
+        // graph already has an active value, just match.
+        // Filtering the results will still be necessary
+        queryEngine.rangeQuery(bgp, queryEnv,function(success,results){
+            if(success) {
+                if(results!=null) {
+                    results = QueryPlanAsync.buildBindingsFromRange(results, bgp);
+                    callback(true,results);
+                } else {
+                    callback(false, results);
+                }
+            } else {
+                callback(false, results);
+            }
+        });
+    }
+};
+
+QueryPlanAsync.executeCrossProductBGP = function(joinVars, bgpa, bgpb, dataset, queryEngine, queryEnv, callback) {
+    QueryPlanAsync.executeBGPDatasets(bgpa, dataset, queryEngine, queryEnv, function(success, bindingsa){
+        if(success) {
+            QueryPlanAsync.executeBGPDatasets(bgpb, dataset, queryEngine, queryEnv, function(success, bindingsb){
+                if(success) {
+                    var bindings = QueryPlanAsync.crossProductBindings(bindingsa, bindingsb);
+                    callback(true, bindings);
+                } else {
+                    callback(false, results);
+                }
+            });
+        } else {
+            callback(false, results);
+        }
+    });
+};
+
+QueryPlanAsync.buildBindingsFromRange = function(results, bgp) {
+    var variables = QueryPlanAsync.variablesInBGP(bgp);
+    var bindings = {};
+
+    var components =  bgp.value||bgp;
+    var bindings = {};
+    for(comp in components) {
+        if(components[comp] && components[comp].token === "var") {
+            bindings[comp] = components[comp].value;
+        } else if(components[comp] && components[comp].token === "blank") {
+            bindings[comp] = "blank:"+components[comp].label;
+        }
+    }
+
+    var resultsBindings =[];
+
+    for(var i=0; i<results.length; i++) {
+        var binding = {};
+        var result  = results[i];
+        for(var comp in bindings) {
+            var value = result[comp];
+            binding[bindings[comp]] = value;
+        }
+        resultsBindings.push(binding);
+    }
+
+    return resultsBindings;
+};
+
+QueryPlanAsync.variablesIntersectionBindings = function(bindingsa, bindingsb) {
     var ia = 0;
     var ib = 0;
     var varsa = [];
@@ -36697,7 +38079,7 @@ QueryPlan.variablesIntersectionBindings = function(bindingsa, bindingsb) {
     return intersection;
 };
 
-QueryPlan.areCompatibleBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.areCompatibleBindings = function(bindingsa, bindingsb) {
     for(var variable in bindingsa) {
         if(bindingsb[variable]!=null && (bindingsb[variable] != bindingsa[variable])) {
             return false;
@@ -36708,7 +38090,7 @@ QueryPlan.areCompatibleBindings = function(bindingsa, bindingsb) {
 };
 
 
-QueryPlan.mergeBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.mergeBindings = function(bindingsa, bindingsb) {
     var merged = {};
     for(var variable in bindingsa) {
         merged[variable] = bindingsa[variable];
@@ -36722,23 +38104,71 @@ QueryPlan.mergeBindings = function(bindingsa, bindingsb) {
 };
 
 
-QueryPlan.joinBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.joinBindings = function(bindingsa, bindingsb) {
     var result = [];
-
+ 
     for(var i=0; i< bindingsa.length; i++) {
         var bindinga = bindingsa[i];
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
-                result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+            if(QueryPlanAsync.areCompatibleBindings(bindinga, bindingb)){
+                result.push(QueryPlanAsync.mergeBindings(bindinga, bindingb));
+            }
+        }
+    }
+ 
+    return result;
+};
+
+QueryPlanAsync.joinBindings2 = function(bindingVars, bindingsa, bindingsb) {
+    var acum = {};
+    var bindings, variable, variableValue, values, tmp;
+    var joined = [];
+
+    for(var i=0; i<bindingsa.length; i++) {
+        bindings = bindingsa[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+            if(j == bindingVars.length-1) {
+                values = tmp[variableValue] || [];
+                values.push(bindings);
+                tmp[variableValue] = values;
+            } else {
+                values = tmp[variableValue] || {};
+                tmp[variableValue] = values;
+                tmp = values;
             }
         }
     }
 
-    return result;
+    for(var i=0; i<bindingsb.length; i++) {
+        bindings = bindingsb[i];
+        tmp = acum;
+        for(var j=0; j<bindingVars.length; j++) {
+            variable = bindingVars[j];
+            variableValue = bindings[variable];
+
+            if(tmp[variableValue] != null) {
+                if(j == bindingVars.length-1) {
+                    for(var k=0; k<tmp[variableValue].length; k++) {
+                        joined.push(QueryPlanAsync.mergeBindings(tmp[variableValue][k],bindings));
+                    }
+                } else {
+                    tmp = tmp[variableValue];
+                }
+            } else {
+                continue;
+            }
+        }
+    }
+
+    return joined;
 };
 
-QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
+
+QueryPlanAsync.augmentMissingBindings = function(bindinga, bindingb) {
     for(var pb in bindingb) {
         if(bindinga[pb] == null) {
             bindinga[pb] = null
@@ -36748,32 +38178,7 @@ QueryPlan.augmentMissingBindings = function(bindinga, bindingb) {
 };
 
 /*
-  QueryPlan.diff = function(bindingsa, biundingsb) {
-  var result = [];
-
-  for(var i=0; i< bindingsa.length; i++) {
-  var bindinga = bindingsa[i];
-  var matched = false;
-  for(var j=0; j<bindingsb.length; j++) {
-  var bindingb = bindingsb[j];
-  if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
-  matched = true;
-  result.push(QueryPlan.mergeBindings(bindinga, bindingb));
-  }
-  }
-  if(matched === false) {
-  // missing bindings must be present for further processing
-  // e.g. filtering by not present value (see DAWG tests
-  // bev-6)
-  QueryPlan.augmentMissingBindings(bindinga, bindingb);
-  result.push(bindinga);
-  }
-  }
-
-  return result;    
-  };
-*/
-QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.diff = function(bindingsa, biundingsb) {
     var result = [];
 
     for(var i=0; i< bindingsa.length; i++) {
@@ -36781,9 +38186,34 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
         var matched = false;
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            if(QueryPlan.areCompatibleBindings(bindinga, bindingb)){
+            if(QueryPlanAsync.areCompatibleBindings(bindinga, bindingb)){
                 matched = true;
-                result.push(QueryPlan.mergeBindings(bindinga, bindingb));
+                result.push(QueryPlanAsync.mergeBindings(bindinga, bindingb));
+            }
+        }
+        if(matched === false) {
+            // missing bindings must be present for further processing
+            // e.g. filtering by not present value (see DAWG tests
+            // bev-6)
+            QueryPlanAsync.augmentMissingBindings(bindinga, bindingb);
+            result.push(bindinga);
+        }
+    }
+
+    return result;    
+};
+*/
+QueryPlanAsync.leftOuterJoinBindings = function(bindingsa, bindingsb) {
+    var result = [];
+
+    for(var i=0; i< bindingsa.length; i++) {
+        var bindinga = bindingsa[i];
+        var matched = false;
+        for(var j=0; j<bindingsb.length; j++) {
+            var bindingb = bindingsb[j];
+            if(QueryPlanAsync.areCompatibleBindings(bindinga, bindingb)){
+                matched = true;
+                result.push(QueryPlanAsync.mergeBindings(bindinga, bindingb));
             }
         }
         if(matched === false) {
@@ -36791,7 +38221,7 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
             // e.g. filtering by not present value (see DAWG tests
             // bev-6)
             // augmentMissingBindings set their value to null.
-            QueryPlan.augmentMissingBindings(bindinga, bindingb);
+            QueryPlanAsync.augmentMissingBindings(bindinga, bindingb);
             result.push(bindinga);
         }
     }
@@ -36799,40 +38229,40 @@ QueryPlan.leftOuterJoinBindings = function(bindingsa, bindingsb) {
     return result;
 };
 
-QueryPlan.crossProductBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.crossProductBindings = function(bindingsa, bindingsb) {
     var result = [];
 
     for(var i=0; i< bindingsa.length; i++) {
         var bindinga = bindingsa[i];
         for(var j=0; j<bindingsb.length; j++) {
             var bindingb = bindingsb[j];
-            result.push(QueryPlan.mergeBindings(bindinga, bindingb));
-        }
+            result.push(QueryPlanAsync.mergeBindings(bindinga, bindingb));
+         }
     }
 
     return result;
 };
 
-QueryPlan.unionBindings = function(bindingsa, bindingsb) {
+QueryPlanAsync.unionBindings = function(bindingsa, bindingsb) {
     return bindingsa.concat(bindingsb);
 };
 
-QueryPlan.unionManyBindings = function(bindingLists) {
+QueryPlanAsync.unionManyBindings = function(bindingLists) {
     var acum = [];
     for(var i=0; i<bindingLists.length; i++) {
         var bindings = bindingLists[i];
-        acum = QueryPlan.unionBindings(acum, bindings);
+        acum = QueryPlanAsync.unionBindings(acum, bindings);
     }
 
     return acum;
-};
+}
 
-// end of ./src/js-query-engine/src/query_plan.js 
+// end of ./src/js-query-engine/src/query_plan_async.js 
 // exports
 var QueryEngine = {};
 
 //imports
-
+var QueryPlan = QueryPlanDPSize;
 QueryEngine.QueryEngine = function(params) {
     if(arguments.length != 0) {
         this.backend = params.backend;
@@ -37145,6 +38575,28 @@ QueryEngine.QueryEngine.prototype.resolveNsInEnvironment = function(prefix, env)
     return namespaces[prefix];
 };
 
+QueryEngine.QueryEngine.prototype.termCost = function(term, env) {
+    if(term.token === 'uri') {
+        var uri = Utils.lexicalFormBaseUri(term, env);
+        if(uri == null) {
+            return(0);
+        } else {
+            return(this.lexicon.resolveUriCost(uri));
+        }
+
+    } else if(term.token === 'literal') {
+        var lexicalFormLiteral = Utils.lexicalFormLiteral(term, env);
+        return(this.lexicon.resolveLiteralCost(lexicalFormLiteral));
+    } else if(term.token === 'blank') {
+        var label = term.label;
+        return this.lexicon.resolveBlankCost(label);
+    } else if(term.token === 'var') {
+        return (this.lexicon.oidCounter/3)
+    } else {
+          return(null);
+    }
+    
+};
 
 QueryEngine.QueryEngine.prototype.normalizeTerm = function(term, env, shouldIndex) {
     if(term.token === 'uri') {
@@ -37257,6 +38709,26 @@ QueryEngine.QueryEngine.prototype.normalizeQuad = function(quad, queryEnv, shoul
             graph:graph});
 };
 
+QueryEngine.QueryEngine.prototype.quadCost = function(quad, queryEnv, shouldIndex) {
+    var subject    = null;
+    var predicate  = null;
+    var object     = null;
+    var graph      = null;
+    var oid;
+
+    if(quad.graph == null) {
+        graph = (this.lexicon.oidCounter/4)
+    } else {
+        graph = this.termCost(quad.graph, queryEnv)
+    }
+
+    subject = this.termCost(quad.subject, queryEnv);
+    predicate = this.termCost(quad.predicate, queryEnv);
+    object = this.termCost(quad.object, queryEnv);
+
+    return(graph+subject+predicate+object);
+};
+
 QueryEngine.QueryEngine.prototype.denormalizeBindingsList = function(bindingsList, envOut) {
     var results = [];
 
@@ -37338,6 +38810,9 @@ QueryEngine.QueryEngine.prototype.execute = function(queryString, callback, defa
                 this.callbacksBackend.startGraphModification();
                 var that = this;
                 this.executeUpdate(syntaxTree, function(success, result){
+		    if(that.lexicon.updateAfterWrite)
+			that.lexicon.updateAfterWrite();
+
                     if(success) {
                         that.callbacksBackend.endGraphModification(function(){
                             callback(success, result);
@@ -37435,12 +38910,12 @@ QueryEngine.QueryEngine.prototype.executeQuery = function(syntaxTree, callback, 
                                 for(var p=0; p<components.length; p++) {
                                     var component = components[p];
                                     if(tripleTemplate[component].token === 'blank') {
-                                        if(blankMap[tripleTemplate[component].value] != null) {
-                                            tripleTemplate[component].value = blankMap[tripleTemplate[component].value];
+                                        if(blankMap[tripleTemplate[component].label] != null) {
+                                            tripleTemplate[component].value = blankMap[tripleTemplate[component].label];
                                         } else {
                                             var blankId = "_:b"+blankIdCounter;
                                             blankIdCounter++;
-                                            blankMap[tripleTemplate[component].value] = blankId;
+                                            blankMap[tripleTemplate[component].label] = blankId;
                                             tripleTemplate[component].value = blankId;
                                         }
                                     }
@@ -37535,12 +39010,10 @@ QueryEngine.QueryEngine.prototype.executeSelect = function(unit, env, defaultDat
                 }
                 
             } else { // fail selectUnit
-                console.log("ERROR selectUnit");
                 callback(false, result);
             }
         } else { // fail  normalizaing datasets
-            console.log("ERROR normalizing");
-            callback(false,results);
+            callback(false,"Error normalizing datasets");
         }
     } else {
         callback(false,"Cannot execute " + unit.kind + " query as a select query");
@@ -37725,7 +39198,7 @@ QueryEngine.QueryEngine.prototype.executeUNION = function(projection, dataset, p
 
 QueryEngine.QueryEngine.prototype.executeAndBGP = function(projection, dataset, patterns, env) {
     var that = this;
-    var result = QueryPlan.executeAndBGPs(patterns.value, dataset, this, env);
+    var result = QueryPlan.executeAndBGPsDPSize(patterns.value, dataset, this, env);
     if(result!=null) {
         return QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
     } else {
@@ -37843,7 +39316,6 @@ QueryEngine.QueryEngine.prototype.executeJOIN = function(projection, dataset, pa
     }
 
     var result = QueryPlan.joinBindings(set1, set2);
-
     result = QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
     return result;
 };
@@ -37854,7 +39326,7 @@ QueryEngine.QueryEngine.prototype.rangeQuery = function(quad, queryEnv) {
     //console.log("BEFORE:");
     //console.log("QUAD:");
     //console.log(quad);
-    var key = that.normalizeQuad(quad, queryEnv, false)
+    var key = that.normalizeQuad(quad, queryEnv, false);
     if(key != null) {
         //console.log("RANGE QUERY:")
         //console.log(key);
@@ -37915,6 +39387,7 @@ QueryEngine.QueryEngine.prototype.executeUpdate = function(syntaxTree, callback)
                 if(success == false) {
                     console.log("Error loading graph");
                     console.log(result);
+                    callback(false, "error batch loading quads");
                 } else {
                     var result = that.batchLoad(result);
                     callback(result!=null, result||"error batch loading quads");
@@ -38018,18 +39491,24 @@ QueryEngine.QueryEngine.prototype.batchLoad = function(quads, callback) {
         originalQuad = quad;
         quad = {subject: subject, predicate:predicate, object:object, graph: graph};
         key = new QuadIndexCommon.NodeKey(quad);
-          
-        var result = this.backend.index(key)
-        if(result == true){
-            if(this.eventsOnBatchLoad)
-                this.callbacksBackend.nextGraphModification(Callbacks.added, [originalQuad,quad]);
-            counter = counter + 1;
-        } else {
-            success = false;
-            break;
+
+        var result = this.backend.search(key);
+        if(!result) {
+            result = this.backend.index(key)
+            if(result == true){
+                if(this.eventsOnBatchLoad)
+                    this.callbacksBackend.nextGraphModification(Callbacks.added, [originalQuad,quad]);
+                counter = counter + 1;
+            } else {
+                success = false;
+                break;
+            }
         }
 
     }
+
+    if(this.lexicon.updateAfterWrite != null)
+	this.lexicon.updateAfterWrite();
 
     var exitFn = function(){
         if(success) {
@@ -38055,6 +39534,15 @@ QueryEngine.QueryEngine.prototype.batchLoad = function(quads, callback) {
         return null;
     }
 };
+
+// @modified dp
+QueryEngine.QueryEngine.prototype.computeCosts = function(quads, env) {
+    for(var i=0; i<quads.length; i++) {
+        quads[i]['_cost'] = this.quadCost(quads[i],env);
+    }
+
+    return quads;
+}
 
 // Low level operations for update queries
 
@@ -38321,6 +39809,1936 @@ QueryEngine.QueryEngine.prototype.registerDefaultNamespace = function(ns, prefix
 
 // end of ./src/js-query-engine/src/query_engine.js 
 // exports
+var MongodbQueryEngine = {};
+
+//imports
+var mongodb = require('mongodb');
+
+MongodbQueryEngine.mongodb = true;
+
+MongodbQueryEngine.MongodbQueryEngine = function(params) {
+    var params = params || {};
+    var server = params['mongoDomain'] || '127.0.0.1';
+    var port = params['mongoPort'] || 27017;
+    var mongoOptions = params['mongoOptions'] || {};
+    var mongoDBName = params['name'] || 'rdfstore_js';
+
+    this.lexicon = this;
+    this.backend = this;
+
+    this.client = new mongodb.Db(mongoDBName, new mongodb.Server(server,port,mongoOptions));
+    this.defaultGraphOid = "u:https://github.com/antoniogarrote/rdfstore-js#default_graph";
+    this.defaultGraphUri = "https://github.com/antoniogarrote/rdfstore-js#default_graph";
+    this.defaultGraphUriTerm = {"token": "uri", "prefix": null, "suffix": null, "value": this.defaultGraphUri, "oid": this.defaultGraphOid};
+
+    this.configuration = null;
+
+    // batch loads should generate events?
+    this.eventsOnBatchLoad = (params.eventsOnBatchLoad || false);
+    // list of namespaces that will be automatically added to every query
+    this.defaultPrefixes = {};
+    this.abstractQueryTree = new AbstractQueryTree.AbstractQueryTree();
+    this.rdfLoader = new RDFLoader.RDFLoader(params['communication']);
+    this.callbacksBackend = new Callbacks.CallbacksBackend(this);
+};
+
+// Utils
+MongodbQueryEngine.MongodbQueryEngine.prototype.collection = function(collection, f) {
+    var that = this;
+    var _collection = function() {
+        that.client.collection(collection, f);
+    };
+    if(this.client.state === 'notConnected' || this.client.state === 'disconnected') {
+        this.client.open(function(err, p_client) {
+            _collection();
+        });
+    } else {
+        _collection();
+    }
+
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.clean = function(callback) {
+    var that = this;
+    this.collection('quads', function(err, coll) {
+        coll.drop(function(){
+            that.collection('store_configuration', function(err, coll) {
+                coll.drop(function(){
+                    that.readConfiguration(function(){
+                        callback();
+                    });
+                });
+            });
+        });
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registerNsInEnvironment = function(prologue, env) {
+    var prefixes = prologue.prefixes;
+    var toSave = {};
+
+    // adding default prefixes;
+    for(var p in this.defaultPrefixes) {
+        toSave[p] = this.defaultPrefixes[p];
+    }
+
+    for(var i=0; i<prefixes.length; i++) {
+        var prefix = prefixes[i];
+        if(prefix.token === "prefix") {
+            toSave[prefix.prefix] = prefix.local;
+        }
+    }
+
+    env.namespaces = toSave;
+    if(prologue.base && typeof(prologue.base) === 'object') {
+        env.base = prologue.base.value;
+    } else {
+        env.base = null;
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.applyModifier = function(modifier, projectedBindings) {
+    if(modifier == "DISTINCT") {
+        var map = {};
+        var result = [];
+        for(var i=0; i<projectedBindings.length; i++) {
+            var bindings = projectedBindings[i];
+            var key = "";
+         
+            // if no projection variables hash is passed, all the bound
+            // variable in the current bindings will be used.
+            for(var p in (bindings)) {
+                // hashing the object
+                var obj = bindings[p];
+                if(obj == null) {
+                    key = key+p+'null';
+                } else if(obj.token == 'literal') {
+                    if(obj.value != null) {
+                        key = key + obj.value;
+                    }
+                    if(obj.lang != null) {
+                        key = key + obj.lang;
+                    }
+                    if(obj.type != null) {
+                        key = key + obj.type;
+                    }
+                } else if(obj.value) {
+                    key  = key + p + obj.value;
+                } else {
+                    key = key + p + obj;
+                }
+            }
+         
+            if(map[key] == null) {
+                // this will preserve the order in projectedBindings
+                result.push(bindings);
+                map[key] = true;
+            }
+        }
+        return result; 
+    } else {
+        return projectedBindings;
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.applyLimitOffset = function(offset, limit, bindings) {
+    if(limit == null && offset == null) {
+        return bindings;
+    }
+
+    if (offset == null) {
+        offset = 0;
+    }
+
+    if(limit == null) {
+        limit = bindings.length;
+    } else {
+        limit = offset + limit;
+    }
+
+    return bindings.slice(offset, limit);
+};
+
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.applySingleOrderBy = function(orderFilters, modifiedBindings, dataset, outEnv) {
+    var acum = [];
+    for(var i=0; i<orderFilters.length; i++) {
+        var orderFilter = orderFilters[i];
+        var results = QueryFilters.collect(orderFilter.expression, [modifiedBindings], dataset, outEnv, this);
+        acum.push(results[0].value);
+    }
+    return {binding:modifiedBindings, value:acum};
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.applyOrderBy = function(order, modifiedBindings, dataset, outEnv) {
+    var that = this;
+    var acum = [];
+    if(order != null && order.length > 0) {
+        for(var i=0; i<modifiedBindings.length; i++) {
+            var bindings = modifiedBindings[i];
+            var results = that.applySingleOrderBy(order, bindings, dataset, outEnv);
+            acum.push(results);
+        }
+
+        acum.sort(function(a,b){
+            return that.compareFilteredBindings(a, b, order, outEnv);
+        });
+
+        var toReturn = [];
+        for(var i=0; i<acum.length; i++) {
+            toReturn.push(acum[i].binding);
+        }
+
+        return toReturn;
+    } else {
+        return modifiedBindings;
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.compareFilteredBindings = function(a, b, order, env) {
+    var found = false;
+    var i = 0;
+    while(!found) {
+        if(i==a.value.length) {
+            return 0;
+        }
+        var direction = order[i].direction;
+        var filterResult;
+
+        // unbound first
+        if(a.value[i] == null && b.value[i] == null) {
+            i++;
+            continue;
+        }else if(a.value[i] == null) {
+            filterResult = {value: false};
+        } else if(b.value[i] == null) {
+            filterResult = {value: true};
+        } else 
+
+        // blanks
+        if(a.value[i].token === 'blank' && b.value[i].token === 'blank') {
+            i++;
+            continue;
+        } else if(a.value[i].token === 'blank') { 
+            filterResult = {value: false};            
+        } else if(b.value[i].token === 'blank') {
+            filterResult = {value: true};        
+        } else 
+
+        // uris
+        if(a.value[i].token === 'uri' && b.value[i].token === 'uri') {
+            if(QueryFilters.runEqualityFunction(a.value[i], b.value[i], [], this, env).value == true) {
+                i++;
+                continue;
+            } else {
+                filterResult = QueryFilters.runTotalGtFunction(a.value[i], b.value[i], []);
+            }
+        } else if(a.value[i].token === 'uri') { 
+            filterResult = {value: false};            
+        } else if(b.value[i].token === 'uri') {
+            filterResult = {value: true};        
+        } else 
+
+        // simple literals
+        if(a.value[i].token === 'literal' && b.value[i].token === 'literal' && a.value[i].type == null && b.value[i].type == null) {
+            if(QueryFilters.runEqualityFunction(a.value[i], b.value[i], [], this, env).value == true) {
+                i++;
+                continue;
+            } else {
+                filterResult = QueryFilters.runTotalGtFunction(a.value[i], b.value[i], []);
+            }
+        } else if(a.value[i].token === 'literal' && a.value[i].type == null) { 
+            filterResult = {value: false};            
+        } else if(b.value[i].token === 'literal' && b.value[i].type == null) {
+            filterResult = {value: true};        
+        } else 
+
+        // literals
+        if(QueryFilters.runEqualityFunction(a.value[i], b.value[i], [], this, env).value == true) {
+            i++;
+            continue;
+        } else {
+            filterResult = QueryFilters.runTotalGtFunction(a.value[i], b.value[i], []);
+        }     
+
+
+        // choose value for comparison based on the direction
+        if(filterResult.value == true) {
+            if(direction === "ASC") {
+                return 1;
+            } else {
+                return -1;
+            }
+        } else {
+            if(direction === "ASC") {
+                return -1;
+            } else {
+                return 1;
+            }
+        }       
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.removeDefaultGraphBindings = function(bindingsList, dataset) {
+    var onlyDefaultDatasets = [];
+    var namedDatasetsMap = {};
+    for(var i=0; i<dataset.named.length; i++) {
+        namedDatasetsMap[dataset.named[i].oid] = true;
+    }
+    for(i=0; i<dataset['default'].length; i++) {
+        if(namedDatasetsMap[dataset['default'][i].oid] == null) {
+            onlyDefaultDatasets.push(dataset['default'][i].oid);
+        }
+    }
+    var acum = [];
+    for(i=0; i<bindingsList.length; i++) {
+        var bindings = bindingsList[i];
+        var foundDefaultGraph = false;
+        for(var p in bindings) {
+            for(var j=0; j<namedDatasetsMap.length; j++) {
+                if(bindings[p] === namedDatasetsMap[j]) {
+                    foundDefaultGraph = true;
+                    break;
+                }
+            }
+            if(foundDefaultGraph) {
+                break;
+            }
+        }
+        if(!foundDefaultGraph) {
+            acum.push(bindings);
+        }
+    }
+
+    return acum;
+};
+
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.aggregateBindings = function(projection, bindingsGroup, dataset, env) {
+    var denormBindings = this.copyDenormalizedBindings(bindingsGroup, env.outCache);
+    var aggregatedBindings = {};
+    for(var i=0; i<projection.length; i++) {
+        var aggregatedValue = QueryFilters.runAggregator(projection[i], denormBindings, this, dataset, env);
+        if(projection[i].alias) {
+            aggregatedBindings[projection[i].alias.value] = aggregatedValue; 
+        } else {
+            aggregatedBindings[projection[i].value.value] = aggregatedValue; 
+        }
+    }
+    return(aggregatedBindings);
+};
+
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.projectBindings = function(projection, results, dataset) {
+    if(projection[0].kind === '*'){
+        return results;
+    } else {
+        var toProject = [];
+        var projectedResults = [];
+
+        for(var i=0; i<results.length; i++) {
+            var currentResult = results[i];
+            var currentProjected = {};
+            var shouldAdd = true;
+
+            for(var j=0; j< projection.length; j++) {
+                if(projection[j].token == 'variable' && projection[j].kind != 'aliased') {
+                    currentProjected[projection[j].value.value] = currentResult[projection[j].value.value];
+                } else if(projection[j].token == 'variable' && projection[j].kind == 'aliased') {
+                    var ebv = QueryFilters.runFilter(projection[j].expression, currentResult, this, dataset, {blanks:{}, outCache:{}});
+                    if(QueryFilters.isEbvError(ebv)) {
+                        shouldAdd = false;
+                        break;
+                    } else {
+                        currentProjected[projection[j].alias.value] = ebv;
+                    }
+                }
+            }
+
+            if(shouldAdd === true) {
+                projectedResults.push(currentProjected);
+            }
+            
+        }
+
+        return projectedResults;
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.resolveNsInEnvironment = function(prefix, env) {
+    var namespaces = env.namespaces;
+    return namespaces[prefix];
+};
+
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registerUri = function(uri) {
+    return "u:"+uri;
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registerLiteral = function(literal) {
+    return "l:"+literal;
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.normalizeTerm = function(term, env, shouldIndex) {
+    if(term.token === 'uri') {
+        var uri = Utils.lexicalFormBaseUri(term, env);
+        if(uri == null) {
+            return(null);
+        } else {
+            if(shouldIndex) {
+                //return(this.lexicon.registerUri(uri));
+                return("u:"+uri);
+            } else {
+                //return(this.lexicon.resolveUri(uri));
+                return("u:"+uri);
+            }
+        }
+
+    } else if(term.token === 'literal') {
+        var lexicalFormLiteral = Utils.lexicalFormLiteral(term, env);
+        if(shouldIndex) {
+            //var oid = this.lexicon.registerLiteral(lexicalFormLiteral);
+            var oid = "l:"+lexicalFormLiteral;
+            return(oid);
+        } else {
+            //var oid = this.lexicon.resolveLiteral(lexicalFormLiteral);
+            var oid = "l:"+lexicalFormLiteral;
+            return(oid);
+        }
+    } else if(term.token === 'blank') {
+        var label = term.label;
+        var oid = env.blanks[label];
+        if( oid != null) {
+            return(oid);
+        } else {
+            if(shouldIndex) {
+                //var oid = this.lexicon.registerBlank(label);
+                oid = "b:"+this.blankCounter;
+                this.blankCounter++;
+
+                env.blanks[label] = oid;
+                return(oid);
+            } else {
+                //var oid = this.lexicon.resolveBlank(label);
+                oid = "b:"+this.blankCounter;
+                this.blankCounter++;
+
+                env.blanks[label] = oid;
+                return(oid);
+            }
+        }
+    } else if(term.token === 'var') {
+        return(term.value);
+    } else {
+          return(null);
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.normalizeDatasets = function(datasets, outerEnv, callback) {
+    var that = this;
+    for(var i=0; i<datasets.length; i++) {
+        var dataset = datasets[i];
+        if(dataset.value === that.defaultGraphUri) {
+            dataset.oid = that.defaultGraphOid;
+        } else {
+            var oid = that.normalizeTerm(dataset, outerEnv, false);      
+            if(oid != null) {
+                dataset.oid = oid;
+            } else {
+                return(null);
+            }
+        }  
+    }
+
+    return true
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.normalizeQuad = function(quad, queryEnv, shouldIndex) {
+    var subject    = null;
+    var predicate  = null;
+    var object     = null;
+    var graph      = null;
+    var oid;
+
+    if(quad.graph == null) {
+        graph = this.defaultGraphOid;
+    } else {
+        oid = this.normalizeTerm(quad.graph, queryEnv, shouldIndex)
+        if(oid!=null) {
+            graph = oid;
+            //if(shouldIndex === true)
+            //    this.registerGraph(oid);
+        } else {
+            return null;
+        }
+    }
+
+    oid = this.normalizeTerm(quad.subject, queryEnv, shouldIndex);
+    if(oid!=null) {
+        subject = oid;
+    } else {
+        return null
+    }
+
+    oid = this.normalizeTerm(quad.predicate, queryEnv, shouldIndex);
+    if(oid!=null) {
+        predicate = oid;
+    } else {
+        return null
+    }
+
+    oid = this.normalizeTerm(quad.object, queryEnv, shouldIndex);
+    if(oid!=null) {
+        object = oid;
+    } else {
+        return null
+    }
+
+    return({subject:subject, 
+            predicate:predicate, 
+            object:object, 
+            graph:graph});
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.denormalizeBindingsList = function(bindingsList, envOut) {
+    var results = [];
+
+    for(var i=0; i<bindingsList.length; i++) {
+        result = this.denormalizeBindings(bindingsList[i], envOut)
+        results.push(result);
+    }
+    return(results);
+};
+
+/**
+ * Receives a bindings map (var -> oid) and an out cache (oid -> value)
+ * returns a bindings map (var -> value) storing in cache all the missing values for oids
+ *
+ * This is required just to save lookups when final results are generated.
+ */
+MongodbQueryEngine.MongodbQueryEngine.prototype.copyDenormalizedBindings = function(bindingsList, out, callback) {
+    var denormList = [];
+    for(var i=0; i<bindingsList.length; i++) {
+        var denorm = {};
+        var bindings = bindingsList[i];
+        var variables = Utils.keys(bindings);
+        for(var j=0; j<variables.length; j++) {
+            var oid = bindings[variables[j]];
+            if(oid == null) {
+                // this can be null, e.g. union different variables (check SPARQL recommendation examples UNION)
+                denorm[variables[j]] = null;
+            } else if(typeof(oid) === 'object') {
+                // the binding is already denormalized, this can happen for example because the value of the
+                // binding is the result of the aggregation of other bindings in a GROUP clause
+                denorm[variables[j]] = oid;
+            } else {
+                var inOut = out[oid];
+                if(inOut!= null) {
+                    denorm[variables[j]] = inOut;
+                } else {                    
+                    var val = this.retrieve(oid);
+                    out[oid] = val;
+                    denorm[variables[j]] = val;
+                }
+            }
+        }
+        denormList.push(denorm);
+    }
+    return denormList;
+};
+
+/**
+ * Moved here from the Lexicon object
+ */
+MongodbQueryEngine.MongodbQueryEngine.prototype.parseUri = function(uriString) {
+    return {token: "uri", value:uriString};
+};
+
+/**
+ * Moved here from the Lexicon object
+ */
+MongodbQueryEngine.MongodbQueryEngine.prototype.parseLiteral = function(literalString) {
+    var parts = literalString.lastIndexOf("@");
+    if(parts!=-1 && literalString[parts-1]==='"' && literalString.substring(parts, literalString.length).match(/^@[a-zA-Z\-]+$/g)!=null) {
+        var value = literalString.substring(1,parts-1);
+        var lang = literalString.substring(parts+1, literalString.length);
+        return {token: "literal", value:value, lang:lang};
+    }
+
+    var parts = literalString.lastIndexOf("^^");
+    if(parts!=-1 && literalString[parts-1]==='"' && literalString[parts+2] === '<' && literalString[literalString.length-1] === '>') {
+        var value = literalString.substring(1,parts-1);
+        var type = literalString.substring(parts+3, literalString.length-1);
+
+        return {token: "literal", value:value, type:type};
+    }
+
+    var value = literalString.substring(1,literalString.length-1);
+    return {token:"literal", value:value};
+};
+
+/**
+ * Moved here from the Lexicon object
+ */
+MongodbQueryEngine.MongodbQueryEngine.prototype.retrieve = function(oid) {
+    try {
+        if(oid === this.defaultGraphOid) {
+            return({ token: "uri", 
+                       value:this.defaultGraphUri,
+                       prefix: null,
+                       suffix: null,
+                       defaultGraph: true });
+        } else {
+
+            var parts = oid.split(":");
+            var tag = parts.shift();
+            var oid = parts.join(":");
+            
+            if(tag === "u") {
+                return(this.parseUri(oid));
+            } else if(tag === "l") {
+                return(this.parseLiteral(oid));
+            } else if(tag === "b") {
+                return({token:"blank", value:"_:"+oid});
+            } else {
+                throw("Unknown OID tag "+tag);
+            }
+        }
+    } catch(e) {
+        console.log("error in lexicon retrieving OID:");
+        console.log(oid);
+        if(e.message || e.stack) {
+            if(e.message) {
+                console.log(e.message); 
+            }
+            if(e.stack) {
+                console.log(e.stack);
+            }
+        } else {
+            console.log(e);
+        }
+        throw new Error("Unknown retrieving OID in lexicon:"+oid);
+
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.denormalizeBindings = function(bindings, envOut, callback) {
+    var variables = Utils.keys(bindings);
+
+    for(var i=0; i<variables.length; i++) {
+        var oid = bindings[variables[i]];
+        if(oid == null) {
+            // this can be null, e.g. union different variables (check SPARQL recommendation examples UNION)
+            bindings[variables[i]] = null;
+        } else {
+            if(envOut[oid] != null) {
+                bindings[variables[i]] = envOut[oid];
+            } else {
+                var val = this.retrieve(oid)
+                bindings[variables[i]] = val;
+            }
+        }
+    }
+    return bindings;
+};
+
+// Queries execution
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.execute = function(queryString, callback, defaultDataset, namedDataset){
+    try{
+        queryString = Utils.normalizeUnicodeLiterals(queryString);
+
+        var syntaxTree = this.abstractQueryTree.parseQueryString(queryString);
+        if(syntaxTree == null) {
+            callback(false,"Error parsing query string");
+        } else {
+            if(syntaxTree.token === 'query' && syntaxTree.kind == 'update')  {
+                this.callbacksBackend.startGraphModification();
+                var that = this;
+                this.executeUpdate(syntaxTree, function(success, result){
+                    if(success) {
+                        that.callbacksBackend.endGraphModification(function(){
+                            callback(success, result);
+                        });
+                    } else {
+                        that.callbacksBackend.cancelGraphModification();
+                        callback(success, result);
+                    }
+                });
+            } else if(syntaxTree.token === 'query' && syntaxTree.kind == 'query') {
+                this.executeQuery(syntaxTree, callback, defaultDataset, namedDataset);
+            }
+        }
+    } catch(e) {
+        if(e.name && e.name==='SyntaxError') {
+            callback(false, "Syntax error: \nmessage:"+e.message+"\nline "+e.line+", column:"+e.column);
+        } else {
+            callback(false, "Query execution error");
+        }
+    }
+};
+
+// Retrieval queries
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeQuery = function(syntaxTree, callback, defaultDataset, namedDataset) {
+    var prologue = syntaxTree.prologue;
+    var units = syntaxTree.units;
+    var that = this;
+
+    // environment for the operation -> base ns, declared ns, etc.
+    var queryEnv = {blanks:{}, outCache:{}};
+    this.registerNsInEnvironment(prologue, queryEnv);
+
+    // retrieval queries can only have 1 executable unit
+    var aqt = that.abstractQueryTree.parseExecutableUnit(units[0]);
+
+    // can be anything else but a select???
+    if(aqt.kind === 'select') {
+      this.executeSelect(aqt, queryEnv, defaultDataset, namedDataset, function(success, result){
+          if(success) {
+              if(typeof(result) === 'object' && result.denorm === true) {
+                  callback(true, result['bindings']);
+              } else {
+                  var result = that.denormalizeBindingsList(result, queryEnv.outCache);
+                  if(result != null) {                        
+                      callback(true, result);
+                  } else {
+                      callback(false, result);
+                  }
+              }
+          } else {
+              callback(false, result);
+          }
+      });
+    } else if(aqt.kind === 'ask') {
+        aqt.projection = [{"token": "variable", "kind": "*"}];
+        this.executeSelect(aqt, queryEnv, defaultDataset, namedDataset, function(success, result){
+            if(success) {
+                if(success) {              
+                    if(result.length>0) {
+                        callback(true, true);
+                    } else {
+                        callback(true, false);
+                    }
+                } else {
+                    callback(false, result);
+                }
+            } else {
+                callback(false, result);
+            }
+        });
+    } else if(aqt.kind === 'construct') {
+        aqt.projection = [{"token": "variable", "kind": "*"}];
+        that = this;
+        this.executeSelect(aqt, queryEnv, defaultDataset, namedDataset, function(success, result){
+            if(success) {
+                if(success) {              
+                    var result = that.denormalizeBindingsList(result, queryEnv.outCache);
+                    if(result != null) { 
+                        var graph = new RDFJSInterface.Graph();
+                            
+                        // CONSTRUCT WHERE {} case
+                        if(aqt.template == null) {
+                            aqt.template = {triplesContext: aqt.pattern};
+                        }
+
+                        var blankIdCounter = 1;
+                        for(var i=0; i<result.length; i++) {
+                            var bindings = result[i];
+                            var blankMap = {};
+                            for(var j=0; j<aqt.template.triplesContext.length; j++) {
+                                // fresh IDs for blank nodes in the construct template
+                                var components = ['subject', 'predicate', 'object'];
+                                var tripleTemplate = aqt.template.triplesContext[j];                                    
+                                for(var p=0; p<components.length; p++) {
+                                    var component = components[p];
+                                    if(tripleTemplate[component].token === 'blank') {
+                                        if(blankMap[tripleTemplate[component].label] != null) {
+                                            tripleTemplate[component].value = blankMap[tripleTemplate[component].label];
+                                        } else {
+                                            var blankId = "_:b"+blankIdCounter;
+                                            blankIdCounter++;
+                                            blankMap[tripleTemplate[component].label] = blankId;
+                                            tripleTemplate[component].value = blankId;
+                                        }
+                                    }
+                                }
+                                var s = RDFJSInterface.buildRDFResource(tripleTemplate.subject,bindings,that,queryEnv);
+                                var p = RDFJSInterface.buildRDFResource(tripleTemplate.predicate,bindings,that,queryEnv);
+                                var o = RDFJSInterface.buildRDFResource(tripleTemplate.object,bindings,that,queryEnv);
+                                if(s!=null && p!=null && o!=null) {
+                                    var triple = new RDFJSInterface.Triple(s,p,o);
+                                    graph.add(triple);
+                                    //} else {
+                                    //    return callback(false, "Error creating output graph")
+                                }
+                            }
+                        }
+                        callback(true,graph);
+                    } else {
+                        callback(false, result);
+                    }
+                } else {
+                    callback(false, result);
+                }
+            } else {
+                callback(false, result);
+            }
+        });
+    }
+};
+
+
+// Select queries
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeSelect = function(unit, env, defaultDataset, namedDataset, callback) {
+    if(unit.kind === "select" || unit.kind === "ask" || unit.kind === "construct" || unit.kind === "modify") {
+        var projection = unit.projection;
+        var dataset    = unit.dataset;
+        var modifier   = unit.modifier;
+        var limit      = unit.limit;
+        var offset     = unit.offset;
+        var order      = unit.order;
+        var that = this;
+
+        if(defaultDataset != null || namedDataset != null) {
+            dataset['default'] = defaultDataset || [];
+            dataset.named   = namedDataset || [];
+        } 
+
+        if(dataset['default'] != null && dataset['default'].length === 0 && dataset.named !=null && dataset.named.length === 0) {
+            // We add the default graph to the default merged graph
+            dataset['default'].push(this.defaultGraphUriTerm);
+        }
+
+        if (that.normalizeDatasets(dataset['default'].concat(dataset.named), env) != null) {
+            that.executeSelectUnit(projection, dataset, unit.pattern, env, function(success, result){
+                if(success) {
+                    // detect single group
+                    if(unit.group!=null && unit.group === "") {
+                        var foundUniqueGroup = false;
+                        for(var i=0; i<unit.projection.length; i++) {
+                            if(unit.projection[i].expression!=null && unit.projection[i].expression.expressionType === 'aggregate') {
+                                foundUniqueGroup = true;
+                                break;
+                            }
+                        }
+                        if(foundUniqueGroup === true) {
+                            unit.group = 'singleGroup';
+                        }
+                    }
+                    if(unit.group && unit.group != "") {
+                        if(that.checkGroupSemantics(unit.group,projection)) {
+                            var groupedBindings = that.groupSolution(result, unit.group, env);
+                             
+                            var aggregatedBindings = [];
+                            var foundError = false;
+                            
+                            for(var i=0; i<groupedBindings.length; i++) {
+                                var resultingBindings = that.aggregateBindings(projection, groupedBindings[i], dataset, env)
+                                aggregatedBindings.push(resultingBindings);
+                            }
+                            callback(true, {'bindings': aggregatedBindings, 'denorm':true});
+                        } else {
+                            callback(false, "Incompatible Group and Projection variables");
+                        }
+                    } else {
+                        var orderedBindings = that.applyOrderBy(order, result, dataset, env)
+                        var projectedBindings = that.projectBindings(projection, orderedBindings);
+                        modifiedBindings = that.applyModifier(modifier, projectedBindings);
+                        var limitedBindings  = that.applyLimitOffset(offset, limit, modifiedBindings);
+                        filteredBindings = that.removeDefaultGraphBindings(limitedBindings, dataset);
+                                
+                        callback(true, filteredBindings);
+                    }
+
+                } else { // fail selectUnit
+                    callback(false, result);
+                }
+            });
+        } else { // fail  normalizaing datasets
+            callback(false,"Error normalizing datasets");
+        }
+    } else {
+        callback(false,"Cannot execute " + unit.kind + " query as a select query");
+    }
+};
+
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.groupSolution = function(bindings, group, queryEnv){
+    var order = [];
+    var filteredBindings = [];
+    var initialized = false;
+    var that = this;
+    if(group === 'singleGroup') {
+        return [bindings];
+    } else {
+        for(var i=0; i<bindings.length; i++) {
+            var outFloop = arguments.callee;
+            var currentBindings = bindings[i];
+            var mustAddBindings = true;
+
+            /**
+             * In this loop, we iterate through all the group clauses and tranform the current bindings
+             * according to the group by clauses.
+             * If it is the first iteration we also save in a different array the order for the 
+             * grouped variables that will be used later to build the final groups
+             */
+            for(var j=0; j<group.length; j++) {
+                var floop = arguments.callee;
+                var currentOrderClause = group[j];
+                var orderVariable = null;
+
+                if(currentOrderClause.token === 'var') {
+                    orderVariable = currentOrderClause.value;
+
+                    if(initialized == false) {
+                        order.push(orderVariable);
+                    }
+
+                } else if(currentOrderClause.token === 'aliased_expression') {
+                    orderVariable = currentOrderClause.alias.value;
+                    if(initialized == false) {
+                        order.push(orderVariable);
+                    }
+
+                    if(currentOrderClause.expression.primaryexpression === 'var') {
+                        currentBindings[currentOrderClause.alias.value] = currentBindings[currentOrderClause.expression.value.value];
+                    } else {
+                        var denormBindings = this.copyDenormalizedBindings([currentBindings], queryEnv.outCache);
+                        var filterResultEbv = QueryFilters.runFilter(currentOrderClause.expression, denormBindings[0], that, queryEnv);
+                        if(!QueryFilters.isEbvError(filterResultEbv)) {
+                            if(filterResultEbv.value != null) {
+                                filterResultEbv.value = ""+filterResultEbv.value;
+                            }
+                            currentBindings[currentOrderClause.alias.value]= filterResultEbv;
+                        } else {
+                            mustAddBindings = false;
+                        }
+                    }
+                } else {
+                    // In this case, we create an additional variable in the binding to hold the group variable value
+                    var denormBindings = that.copyDenormalizedBindings([currentBindings], queryEnv.outCache);
+                    var filterResultEbv = QueryFilters.runFilter(currentOrderClause, denormBindings[0], that, queryEnv);
+                    if(!QueryFilters.isEbvError(filterResultEbv)) {
+                        currentBindings["groupCondition"+env._i] = filterResultEbv;
+                        orderVariable = "groupCondition"+env._i;
+                        if(initialized == false) {
+                            order.push(orderVariable);
+                        }
+                        
+                    } else {
+                        mustAddBindings = false;
+                    }
+                         
+                }
+                
+            }
+            if(initialized == false) {
+                initialized = true;
+            } 
+            if(mustAddBindings === true) {
+                filteredBindings.push(currentBindings);
+            }
+        }
+        /**
+         * After processing all the bindings, we build the group using the
+         * information stored about the order of the group variables.
+         */
+        var dups = {};
+        var groupMap = {};
+        var groupCounter = 0;
+        for(var i=0; i<filteredBindings.length; i++) {
+            var currentTransformedBinding = filteredBindings[i];
+            var key = "";
+            for(var j=0; j<order.length; j++) {
+                var maybeObject = currentTransformedBinding[order[j]];
+                if(typeof(maybeObject) === 'object') {
+                    key = key + maybeObject.value;
+                } else {
+                    key = key + maybeObject;
+                }
+            }
+
+            if(dups[key] == null) {
+                //currentTransformedBinding["__group__"] = groupCounter; 
+                groupMap[key] = groupCounter;
+                dups[key] = [currentTransformedBinding];
+                //groupCounter++
+            } else {
+                //currentTransformedBinding["__group__"] = dups[key][0]["__group__"]; 
+                dups[key].push(currentTransformedBinding);
+            }
+        }
+
+        // The final result is an array of arrays with all the groups
+        var groups = [];
+            
+        for(var k in dups) {
+            groups.push(dups[k]);
+        }
+
+        return groups;
+    };
+};
+
+
+/**
+ * Here, all the constructions of the SPARQL algebra are handled
+ */
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeSelectUnit = function(projection, dataset, pattern, env, callback) {
+    if(pattern.kind === "BGP") {
+        this.executeAndBGP(projection, dataset, pattern, env, callback);
+    } else if(pattern.kind === "UNION") {
+        this.executeUNION(projection, dataset, pattern.value, env, callback);            
+    } else if(pattern.kind === "JOIN") {
+        this.executeJOIN(projection, dataset, pattern, env, callback);            
+    } else if(pattern.kind === "LEFT_JOIN") {
+        this.executeLEFT_JOIN(projection, dataset, pattern, env, callback);            
+    } else if(pattern.kind === "FILTER") {
+        // Some components may have the filter inside the unit
+        var that = this;
+        this.executeSelectUnit(projection, dataset, pattern.value, env, function(success, results){
+            if(success) {
+                results = QueryFilters.checkFilters(pattern, results, false, dataset, env, that);
+                callback(true, results);
+            } else {
+                callback(false, results);
+            }
+        });
+    } else if(pattern.kind === "EMPTY_PATTERN") {
+        // as an example of this case  check DAWG test case: algebra/filter-nested-2
+        callback(true, []);
+    } else {
+        callback(false, "Cannot execute query pattern " + pattern.kind + ". Not implemented yet.");
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeUNION = function(projection, dataset, patterns, env, callback) {
+    var setQuery1 = patterns[0];
+    var setQuery2 = patterns[1];
+    var set1 = null;
+    var set2 = null;
+
+    if(patterns.length != 2) {
+        throw("SPARQL algebra UNION with more than two components");
+    }
+
+    var that = this;
+    var sets = [];
+
+    Utils.seq(function(k){
+        that.executeSelectUnit(projection, dataset, setQuery1, env, function(success, results){
+            if(success) {
+                set1 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    }, function(k) {
+        that.executeSelectUnit(projection, dataset, setQuery2, env, function(success, results){
+            if(success) {
+                set2 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    })(function(){
+        var result = QueryPlanAsync.unionBindings(set1, set2);
+        result = QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
+        callback(true, result);
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeAndBGP = function(projection, dataset, patterns, env, callback) {
+    var that = this;
+
+    // @modified qp
+    QueryPlanAsync.executeAndBGPsDPSize(patterns.value, dataset, this, env, function(success,result){
+        if(success) {
+            result = QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
+            callback(true, result);
+        } else {
+            callback(false, result);
+        }
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeLEFT_JOIN = function(projection, dataset, patterns, env, callback) {
+    var setQuery1 = patterns.lvalue;
+    var setQuery2 = patterns.rvalue;
+
+    var set1 = null;
+    var set2 = null;
+
+    var that = this;
+    var sets = [];
+
+    Utils.seq(function(k){
+        that.executeSelectUnit(projection, dataset, setQuery1, env, function(success, results){
+            if(success) {
+                set1 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    }, function(k) {
+        that.executeSelectUnit(projection, dataset, setQuery2, env, function(success, results){
+            if(success) {
+                set2 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    })(function(){
+        var result = QueryPlanAsync.leftOuterJoinBindings(set1, set2);
+        //console.log("SETS:")
+        //console.log(set1)
+        //console.log(set2)
+        //console.log("---")
+        //console.log(result);
+
+        var bindings = QueryFilters.checkFilters(patterns, result, true, dataset, env, that);
+        //console.log("---")
+        //console.log(bindings)
+        //console.log("\r\n")
+        if(set1.length>1 && set2.length>1) {
+            var vars = [];
+            var vars1 = {};
+            for(var p in set1[0]) {
+                vars1[p] = true;
+            }
+            for(p in set2[0]) {
+                if(vars1[p] != true) {
+                    vars.push(p);
+                }
+            }
+            acum = [];
+            duplicates = {};
+            for(var i=0; i<bindings.length; i++) {
+                if(bindings[i]["__nullify__"] === true) {
+                    for(var j=0; j<vars.length; j++) {
+                        bindings[i]["bindings"][vars[j]] = null;
+                    }                            
+                    var idx = [];
+                    var idxColl = [];
+                    for(var p in bindings[i]["bindings"]) {
+                        if(bindings[i]["bindings"][p] != null) {
+                            idx.push(p+bindings[i]["bindings"][p]);
+                            idx.sort();
+                            idxColl.push(idx.join(""));
+                        }
+                    }
+                    // reject duplicates -> (set union)
+                    if(duplicates[idx.join("")]==null) {
+                        for(j=0; j<idxColl.length; j++) {
+                            //console.log(" - "+idxColl[j])
+                            duplicates[idxColl[j]] = true;
+                        }
+                        ////duplicates[idx.join("")]= true
+                        acum.push(bindings[i]["bindings"]);
+                    }
+                } else {
+                    acum.push(bindings[i]);
+                    var idx = [];
+                    var idxColl = [];
+                    for(var p in bindings[i]) {
+                        idx.push(p+bindings[i][p]);
+                        idx.sort();
+                        //console.log(idx.join("") + " -> ok");
+                        duplicates[idx.join("")] = true;
+                    }
+
+                }
+            }
+            
+            callback(true, acum);
+        } else {
+            callback(true, bindings);
+        }
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeJOIN = function(projection, dataset, patterns, env, callback) {
+    var setQuery1 = patterns.lvalue;
+    var setQuery2 = patterns.rvalue;
+    var set1 = null;
+    var set2 = null;
+
+    var that = this;
+    var sets = [];
+
+    Utils.seq(function(k){
+        that.executeSelectUnit(projection, dataset, setQuery1, env, function(success, results){
+            if(success) {
+                set1 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    }, function(k) {
+        that.executeSelectUnit(projection, dataset, setQuery2, env, function(success, results){
+            if(success) {
+                set2 = results;
+                return k();
+            } else {
+                return callback(false, results);
+            }
+        });
+    })(function(){
+        var result = QueryPlanAsync.joinBindings(set1, set2);
+
+        result = QueryFilters.checkFilters(patterns, result, false, dataset, env, that);
+        callback(true, result);
+    });
+};
+
+// @modified qp
+MongodbQueryEngine.MongodbQueryEngine.prototype.computeCosts = function(quads, queryEnv, callback) {
+    var that = this;
+    Utils.repeat(0, quads.length, function(k,env) {
+        var quad = quads[env._i];
+        var key = that.normalizeQuad(quad, queryEnv, false);
+        var floop = arguments.callee;
+        that.count(new MongodbQueryEngine.Pattern(key), function(count) {            
+            quads[env._i]['_cost'] = (count==null) ? 1 : count;
+            k(floop, env);
+        });
+    }, function(env) {
+        callback(quads);
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.rangeQuery = function(quad, queryEnv, callback) {
+    var that = this;
+    //console.log("BEFORE:");
+    //console.log("QUAD:");
+    //console.log(quad);
+    var key = that.normalizeQuad(quad, queryEnv, false)
+    if(key != null) {
+        //console.log("RANGE QUERY:")
+        //console.log(key);
+        //console.log(new QuadIndexCommon.Pattern(key));
+        //console.log(key);
+        that.range(new MongodbQueryEngine.Pattern(key),function(quads){
+            //console.log("retrieved");
+            //console.log(quads)
+            if(quads == null || quads.length == 0) {
+                callback(true, []);
+            } else {
+                callback(true, quads);
+            }
+        });
+    } else {
+        callback(false, "Cannot normalize quad: "+quad);
+    }
+};
+
+// Update queries
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.executeUpdate = function(syntaxTree, callback) {
+    var prologue = syntaxTree.prologue;
+    var units = syntaxTree.units;
+    var that = this;
+
+    // environment for the operation -> base ns, declared ns, etc.
+    var queryEnv = {blanks:{}, outCache:{}};
+    this.registerNsInEnvironment(prologue, queryEnv);
+    for(var i=0; i<units.length; i++) {
+
+        var aqt = that.abstractQueryTree.parseExecutableUnit(units[i]);
+        if(aqt.kind === 'insertdata') {
+            Utils.repeat(0, aqt.quads.length, function(k,env) {                
+                var quad = aqt.quads[env._i];
+                var floop = arguments.callee;
+                that._executeQuadInsert(quad, queryEnv, function(result, error) {
+                    if(result === true) {
+                        k(floop, env);
+                    } else {
+                        callback(false, error);
+                    }
+                });
+            }, function(env) {
+                callback(true);
+            });
+        } else if(aqt.kind === 'deletedata') {
+            Utils.repeat(0, aqt.quads.length, function(k,env) {                
+                var quad = aqt.quads[env._i];
+                var floop = arguments.callee;
+                that._executeQuadDelete(quad, queryEnv, function(result, error) {
+                    if(result === true) {
+                        k(floop, env);
+                    } else {
+                        callback(false, error);
+                    }
+                });
+            }, function(env) {
+                callback(true);
+            });
+        } else if(aqt.kind === 'modify') {
+            this._executeModifyQuery(aqt, queryEnv, callback);
+        } else if(aqt.kind === 'create') {
+            callback(true);
+        } else if(aqt.kind === 'load') {
+            var graph = {'uri': Utils.lexicalFormBaseUri(aqt.sourceGraph, queryEnv)};
+            if(aqt.destinyGraph != null) {
+                graph = {'uri': Utils.lexicalFormBaseUri(aqt.destinyGraph, queryEnv)};
+            }
+            var that = this;
+            this.rdfLoader.load(aqt.sourceGraph.value, graph, function(success, result){
+                if(success == false) {
+                    console.log("Error loading graph");
+                    console.log(result);
+                } else {
+                    that.batchLoad(result, callback);
+                }
+            });
+        } else if(aqt.kind === 'drop') {
+            this._executeClearGraph(aqt.destinyGraph, queryEnv, callback);
+        } else if(aqt.kind === 'clear') {
+            this._executeClearGraph(aqt.destinyGraph, queryEnv, callback);
+        } else {
+            throw new Error("not supported execution unit");
+        }
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.batchLoad = function(quads, callback) {
+    var that = this;
+    var subject    = null;
+    var predicate  = null;
+    var object     = null;
+    var graph      = null;
+    var oldLimit = Utils.stackCounterLimit;
+    var blanks = {};
+    var maybeBlankOid, oid, quad, key, originalQuad;
+    Utils.stackCounter = 0;
+    Utils.stackCounterLimit = 10;
+
+    if(this.eventsOnBatchLoad)
+        this.callbacksBackend.startGraphModification();
+
+
+    Utils.repeat(0, quads.length, function(kk,env){
+        if(env.success == null) {
+            env.success = true;
+            env.counter = 0;
+        }
+        var floop = arguments.callee;
+        var quad = quads[env._i];
+
+        if(env.success) {
+
+            // subject
+            if(quad.subject['uri'] || quad.subject.token === 'uri') {
+                oid = that.registerUri(quad.subject.uri || quad.subject.value);
+                subject = oid;
+            } else if(quad.subject['literal'] || quad.subject.token === 'literal') {
+                oid = that.registerLiteral(quad.subject.literal || quad.subject.value);
+                subject = oid;                    
+            } else {
+                maybeBlankOid = blanks[quad.subject.blank || quad.subject.value];
+                if(maybeBlankOid == null) {
+                    //maybeBlankOid = that.registerBlank(quad.subject.blank || quad.subject.value)
+                    maybeBlankOid = "b:"+that.blankCounter;
+                    that.blankCounter++;
+
+                    blanks[(quad.subject.blank || quad.subject.value)] = maybeBlankOid;
+                }
+                subject = maybeBlankOid;
+            }
+
+            // predicate
+            if(quad.predicate['uri'] || quad.predicate.token === 'uri') {
+                oid = that.registerUri(quad.predicate.uri || quad.predicate.value);
+                predicate = oid;
+            } else if(quad.predicate['literal'] || quad.predicate.token === 'literal') {
+                oid = that.registerLiteral(quad.predicate.literal || quad.predicate.value);
+                predicate = oid;                    
+            } else {
+                maybeBlankOid = blanks[quad.predicate.blank || quad.predicate.value];
+                if(maybeBlankOid == null) {
+                    //maybeBlankOid = that.registerBlank(quad.predicate.blank || quad.predicate.value)
+                    maybeBlankOid = "b:"+that.blankCounter;
+                    that.blankCounter++;
+
+                    blanks[(quad.predicate.blank || quad.predicate.value)] = maybeBlankOid;
+                }
+                predicate = maybeBlankOid;
+            }
+
+            // object
+            if(quad.object['uri'] || quad.object.token === 'uri') {
+                oid = that.registerUri(quad.object.uri || quad.object.value);
+                object = oid;
+            } else if(quad.object['literal'] || quad.object.token === 'literal') {
+                oid = that.registerLiteral(quad.object.literal || quad.object.value);
+                object = oid;                    
+            } else {
+                maybeBlankOid = blanks[quad.object.blank || quad.object.value];
+                if(maybeBlankOid == null) {
+                    //maybeBlankOid = that.registerBlank(quad.object.blank || quad.object.value)
+                    maybeBlankOid = "b:"+that.blankCounter;
+                    that.blankCounter++;
+
+                    blanks[(quad.object.blank || quad.object.value)] = maybeBlankOid;
+                }
+                object = maybeBlankOid;
+            }
+
+            // graph
+            if(quad.graph['uri'] || quad.graph.token === 'uri') {
+                oid = that.registerUri(quad.graph.uri || quad.graph.value);
+                //that.registerGraph(oid);
+                graph = oid;
+                
+            } else if(quad.graph['literal'] || quad.graph.token === 'literal') {
+                oid = that.registerLiteral(quad.graph.literal || quad.graph.value);
+                graph = oid;                    
+            } else {
+                maybeBlankOid = blanks[quad.graph.blank || quad.graph.value];
+                if(maybeBlankOid == null) {
+                    //maybeBlankOid = that.registerBlank(quad.graph.blank || quad.graph.value)
+                    maybeBlankOid = "b:"+that.blankCounter;
+                    that.blankCounter++;
+
+                    blanks[(quad.graph.blank || quad.graph.value)] = maybeBlankOid;
+                }
+                graph = maybeBlankOid;
+            }
+
+
+
+            originalQuad = quad;
+            var quad = {subject: subject, predicate:predicate, object:object, graph: graph};
+              
+            that.index(quad, function(result, error){
+                if(result == true){
+                    if(that.eventsOnBatchLoad)
+                        that.callbacksBackend.nextGraphModification(Callbacks.added, [originalQuad,quad]);
+
+                    env.counter = env.counter + 1;
+                    kk(floop, env);
+                } else {
+                    env.success = false;
+                    kk(floop, env);
+                }
+            });            
+        } else {
+            kk(floop, env);
+        }
+    }, function(env){
+        that.updateBlankCounter(function(){
+            var exitFn = function() {
+                Utils.stackCounterLimit = oldLimit;
+                if(env.success) {
+                    callback(true, env.counter);
+                } else {
+                    callback(false, "error loading quads");
+                }
+            };
+     
+            if(that.eventsOnBatchLoad) {
+                that.callbacksBackend.endGraphModification(function(){
+                    exitFn();
+                });
+            } else {
+                exitFn();
+            }
+        });
+    });
+};
+
+// Low level operations for update queries
+
+MongodbQueryEngine.MongodbQueryEngine.prototype._executeModifyQuery = function(aqt, queryEnv, callback) {
+    var that = this;
+    var querySuccess = true;
+    var error = null;
+    var bindings = null;
+    var components = ['subject', 'predicate', 'object', 'graph'];
+
+    aqt.insert = aqt.insert == null ? [] : aqt.insert;
+    aqt['delete'] = aqt['delete'] == null ? [] : aqt['delete'];
+
+    Utils.seq(
+        function(k) {
+            // select query
+
+            var defaultGraph = [];
+            var namedGraph = [];
+
+            if(aqt['with'] != null) {
+                defaultGraph.push(aqt['with']);
+            }
+
+            if(aqt['using'] != null) {
+                namedGraph = [];
+                for(var i=0; i<aqt['using'].length; i++) {
+                    var usingGraph = aqt['using'][i];
+                    if(usingGraph.kind === 'named') {
+                        namedGraph.push(usingGraph.uri);
+                    } else {
+                        defaultGraph.push(usingGraph.uri);
+                    }
+                }
+            }
+
+            aqt.dataset = {};
+            aqt.projection = [{"token": "variable", "kind": "*"}];
+
+            that.executeSelect(aqt, queryEnv, defaultGraph, namedGraph, function(success, result) {                
+                if(success) {
+                    var result = that.denormalizeBindingsList(result, queryEnv.outCache);
+                    if(result!=null) {
+                        bindings = result;
+                    } else {
+                        querySuccess = false;
+                    }
+                    return k();
+                } else {
+                    querySuccess = false;
+                    return k();
+                }
+            });
+        },function(k) {
+            // delete query
+
+            var defaultGraph = aqt['with'];
+            if(querySuccess) {
+                var quads = [];
+                for(var i=0; i<aqt['delete'].length; i++) {
+                    var src = aqt['delete'][i];
+
+                    for(var j=0; j<bindings.length; j++) {
+                        var quad = {};
+                        var binding = bindings[j];
+
+                        for(var c=0; c<components.length; c++) {
+                            var component = components[c];
+                            if(component == 'graph' && src[component] == null) {
+                                quad['graph'] = defaultGraph;
+                            } else if(src[component].token === 'var') {
+                                quad[component] = binding[src[component].value];
+                            } else {
+                                quad[component] = src[component];
+                            }
+                        }
+
+                        quads.push(quad);
+                    }
+                }
+
+                Utils.repeat(0, quads.length, function(kk,env) {                
+                    var quad = quads[env._i];
+                    var floop = arguments.callee;
+                    that._executeQuadDelete(quad, queryEnv, function(result, error) {
+                        kk(floop, env);
+                    });
+                }, function(env) {
+                    k();
+                });
+            } else {
+                k();
+            }
+        },function(k) {
+            // insert query
+            var defaultGraph = aqt['with'];
+
+            if(querySuccess) {
+                var quads = [];
+                for(var i=0; i<aqt.insert.length; i++) {
+                    var src = aqt.insert[i];
+
+                    for(var j=0; j<bindings.length; j++) {
+                        var quad = {};
+                        var binding = bindings[j];
+
+                        for(var c=0; c<components.length; c++) {
+                            var component = components[c];
+                            if(component == 'graph' && src[component] == null) {
+                                quad['graph'] = defaultGraph;
+                            } else if(src[component].token === 'var') {
+                                quad[component] = binding[src[component].value];
+                            } else {
+                                quad[component] = src[component];
+                            }
+                        }
+
+                        quads.push(quad);
+                    }
+                }
+
+                Utils.repeat(0, quads.length, function(kk,env) {                
+                    var quad = quads[env._i];
+                    var floop = arguments.callee;
+                    that._executeQuadInsert(quad, queryEnv, function(result, error) {
+                        kk(floop, env);
+                    });
+                }, function(env) {
+                    k();
+                });
+            } else {
+                k();
+            }
+        }
+    )(function(){
+        callback(querySuccess);
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype._executeQuadInsert = function(quad, queryEnv, callback) {
+    var that = this;
+    var normalized = this.normalizeQuad(quad, queryEnv, true)
+    if(normalized != null) {
+        that.search(normalized,function(result) {
+            if(result){
+                callback(true, "duplicated");
+            } else {
+                that.index(normalized, function(result, error){
+                    if(result == true){
+                        that.callbacksBackend.nextGraphModification(Callbacks.added, [quad, normalized]);
+                        that.updateBlankCounter(function(){
+                            callback(true);
+                        });
+                    } else {
+                        callback(false, error);
+                    }
+                });
+            }
+        });
+    } else {
+        callback(false, result);
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype._executeQuadDelete = function(quad, queryEnv, callback) {
+    var that = this;
+    var normalized = this.normalizeQuad(quad, queryEnv, false);
+    if(normalized != null) {
+        that['delete'](normalized, function(result, error){
+            that.callbacksBackend.nextGraphModification(Callbacks['deleted'], [quad, normalized]);
+            callback(true);
+        });
+    } else {
+        callback(false, result);
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype._executeClearGraph = function(destinyGraph, queryEnv, callback) {
+    if(destinyGraph === 'default') {
+        this.execute("DELETE { ?s ?p ?o } WHERE { ?s ?p ?o }", callback);
+    } else if(destinyGraph === 'named') {
+        var that = this;
+        this.registeredGraphs(true, function(graphs){
+            if(graphs!=null) {
+                var foundErrorDeleting = false;
+                Utils.repeat(0, graphs.length,function(k,env) {
+                    var graph = graphs[env._i];
+                    var floop = arguments.callee;
+                    if(!foundErrorDeleting) {
+                        that.execute("DELETE { GRAPH <"+graph+"> { ?s ?p ?o } } WHERE { GRAPH <"+graph+"> { ?s ?p ?o } }", function(success, results){
+                            foundErrorDeleting = !success;
+                            k(floop, env);
+                        });
+                    } else {
+                        k(floop, env);
+                    }
+                }, function(env) {
+                    callback(!foundErrorDeleting);
+                });
+            } else {
+                callback(false, "Error deleting named graphs");
+            }
+        });
+    } else if(destinyGraph === 'all') {
+        var that = this;
+        this.execute("CLEAR DEFAULT", function(success, result) {
+            if(success) {
+                that.execute("CLEAR NAMED", callback);
+            } else {
+                callback(false,result);
+            }
+        });
+    } else {
+        // destinyGraph is an URI
+        if(destinyGraph.token == 'uri') {
+            var graphUri = Utils.lexicalFormBaseUri(destinyGraph,queryEnv);
+            if(graphUri != null) {
+                this.execute("DELETE { GRAPH <"+graphUri+"> { ?s ?p ?o } } WHERE { GRAPH <"+graphUri+"> { ?s ?p ?o } }", callback);
+            } else {
+                callback(false, "wrong graph URI");
+            }
+        } else {
+            callback(false, "wrong graph URI");
+        }
+    }
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.checkGroupSemantics = function(groupVars, projectionVars) {
+    if(groupVars === 'singleGroup') {
+        return true;        
+    }
+
+    var projection = {};
+
+    for(var i=0; i<groupVars.length; i++) {
+        var groupVar = groupVars[i];
+        if(groupVar.token === 'var') {
+            projection[groupVar.value] = true;
+        } else if(groupVar.token === 'aliased_expression') {
+            projection[groupVar.alias.value] = true;
+        }
+    }
+
+    for(i=0; i<projectionVars.length; i++) {
+        var projectionVar = projectionVars[i];
+        if(projectionVar.kind === 'var') {
+            if(projection[projectionVar.value.value] == null) {
+                return false;
+            }
+        } else if(projectionVar.kind === 'aliased' && 
+                  projectionVar.expression &&
+                  projectionVar.expression.primaryexpression === 'var') {
+            if(projection[projectionVar.expression.value.value] == null) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registerDefaultNamespace = function(ns, prefix) {
+    this.defaultPrefixes[ns] = prefix;
+};
+
+// Moved here from quadbackend
+MongodbQueryEngine.MongodbQueryEngine.prototype.range = function(pattern, callback)  {
+    var doc = {};
+    
+    if(pattern.subject != null) {
+        doc['subject'] = pattern.subject;
+    }
+    if(pattern.predicate != null) {
+        doc['predicate'] = pattern.predicate;
+    }
+    if(pattern.object != null) {
+        doc['object'] = pattern.object;
+    }
+    if(pattern.graph != null) {
+        doc['graph'] = pattern.graph;
+    }
+    
+    this.collection('quads', function(err,coll) {
+        coll.find(doc).toArray(function(err,res){
+            if(err) {
+                callback(null);
+            } else {
+                callback(res);
+            }
+        });
+    });
+};
+
+// @modified qp
+MongodbQueryEngine.MongodbQueryEngine.prototype.count = function(pattern, callback)  {
+    var doc = {};
+    
+    if(pattern.subject != null) {
+        doc['subject'] = pattern.subject;
+    }
+    if(pattern.predicate != null) {
+        doc['predicate'] = pattern.predicate;
+    }
+    if(pattern.object != null) {
+        doc['object'] = pattern.object;
+    }
+    if(pattern.graph != null) {
+        doc['graph'] = pattern.graph;
+    }
+    
+    this.collection('quads', function(err,coll) {
+        coll.find(doc).count(function(err,count){
+            if(err) {
+                callback(null);
+            } else {
+                callback(count);
+            }
+        });
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.index = function(quad, callback) {
+    this.collection('quads', function(err,coll) {
+        if(err) {
+            callback(false, 'Error retrieving MongoDB collection');
+        } else {
+            coll.insert(quad, function(err,res) {
+                if(err) {
+                    callback(false);                
+                } else {
+                    callback(true);
+                }
+            });
+        }
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.search = function(pattern, callback)  {
+    var doc = {};
+    
+    if(pattern.subject != null) {
+        doc['subject'] = pattern.subject;
+    }
+    if(pattern.predicate != null) {
+        doc['predicate'] = pattern.predicate;
+    }
+    if(pattern.object != null) {
+        doc['object'] = pattern.object;
+    }
+    if(pattern.graph != null) {
+        doc['graph'] = pattern.graph;
+    }
+
+    this.collection('quads', function(err,coll) {
+        coll.findOne(doc,function(err,doc){
+            if(err) {
+                callback(null);
+            } else {
+                callback(doc!=null);
+            }
+        });
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype['delete'] = function(quad, callback) {
+    var doc = {};
+    
+    if(quad.subject != null) {
+        doc['subject'] = quad.subject;
+    }
+    if(quad.predicate != null) {
+        doc['predicate'] = quad.predicate;
+    }
+    if(quad.object != null) {
+        doc['object'] = quad.object;
+    }
+    if(quad.graph != null) {
+        doc['graph'] = quad.graph;
+    }
+    
+    var that = this;
+    this.collection('quads', function(err,coll) {
+        coll.findAndModify(doc,[],{},{remove:true},function(err,doc){
+            callback(that);
+        });
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.updateBlankCounter = function(callback) {
+    var that = this;
+    this.collection('store_configuration', function(err, coll) {
+        that.configuration.blankCounter = that.blankCounter;
+        coll.update({configuration:true}, that.configuration, {safe:true}, callback);
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.readConfiguration = function(callback) {
+    var that = this;
+    this.collection('quads',function(err,coll) {
+        coll.ensureIndex({subject:1, predicate:1, object:1, graph:1},{unique:1},function(){
+            coll.ensureIndex({graph:1, predicate:1},function(){
+                coll.ensureIndex({object:1,graph:1,subject:1},function(){
+                    coll.ensureIndex({predicate:1,object:1,graph:1},function(){
+                        coll.ensureIndex({graph:1,subject:1,predicate:1},function(){
+                            coll.ensureIndex({object:1,subject:1},function(){
+                                that.collection('store_configuration', function(err,coll) {
+                                    coll.find({configuration:true}).toArray(function(err, res) {
+                                        if(res==null || res.length === 0) {
+                                            coll.insert({blankCounter:0, configuration:true}, function(){
+                                                that.blankCounter = 0;
+                                                callback();
+                                            });
+                                        } else {
+                                            that.configuration = res[0];
+                                            that.blankCounter = that.configuration.blankCounter;
+                                            callback();
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registerGraph = function(oid){
+    //if(oid != this.defaultGraphOid) {
+    //    this.knownGraphs[oid] = true;
+    //}
+    //return true
+};
+
+MongodbQueryEngine.MongodbQueryEngine.prototype.registeredGraphs = function(shouldReturnUris, callback) {
+    var that = this;
+    this.collection('quads',function(err,coll) {
+        if(err) {
+            callback(null);
+        } else {
+            coll.distinct('graph',{},function(err,knownGraphs) {
+                if(err) {
+                    callback(null);
+                } else {
+                    var acum = [];
+
+                    for(var i=0; i<knownGraphs.length; i++) {
+                        var g = knownGraphs[i];
+                        if(g!==that.defaultGraphOid) {
+                            if(shouldReturnUris === true) {
+                                acum.push(g.split("u:")[1]);
+                            } else {
+                                acum.push(g);
+                            }
+                        }
+                    }
+                    callback(acum);
+                }
+            });
+        }
+    });
+};
+
+
+MongodbQueryEngine.Pattern = function(components) {
+    var properties = ['subject','predicate','object','graph'];
+    var key = {};
+
+    for(var i=0; i<properties.length; i++) {
+        var component = components[properties[i]];
+        if(component.indexOf("u:")===0 ||
+           component.indexOf("l:")===0 ||
+           component.indexOf("b:")===0) {
+            key[properties[i]] = component;
+        } else {
+            key[properties[i]] = null;
+        }
+    }
+
+    return key;
+};
+
+
+// end of ./src/js-query-engine/src/mongodb_query_engine.js 
+// exports
 var Callbacks = {};
 
 //imports
@@ -38546,7 +41964,6 @@ Callbacks.CallbacksBackend.prototype._tokenizeComponents = function(s, p, o, g) 
         pattern['subject'] = Callbacks.ANYTHING;
     } else {
         if(s.indexOf("_:") == 0) {
-            console.log("BLANK!!");
             pattern['subject'] = {'token': 'blank', 'value':s};
         } else {
             pattern['subject'] = {'token': 'uri', 'value':s};
@@ -38793,55 +42210,46 @@ Callbacks.CallbacksBackend.prototype.dispatchQueries = function(callback) {
 
 // end of ./src/js-query-engine/src/callbacks.js 
 //imports
-//var Worker = require('webworker');
-var Worker = null;
 
 // exports
-var RDFStoreClient = {};
+var RDFStoreChildClient = {};
 
-try {
-    console.log("*** Checking if web workers are available");
-    Worker;
-    console.log("*** Web workers available");
-} catch(e) {
-    Worker = null;
-}
+Worker = true;
 
-// Checks if this is a webworker
-if(!!Worker) {
+RDFStoreChildClient.RDFStoreClient = function(path_to_store_script, args, cb) {
+    this.connection = require('child_process').fork(path_to_store_script,["is_child"]);
 
-    RDFStoreClient.RDFStoreClient = function(path_to_store_script, args, cb) {
-        //console.log("trying to load "+path_to_store_script);
-        if(Worker.Worker) {
-            this.connection = new Worker.Worker(path_to_store_script);
+    this.callbacksCounter = 1;
+    var that = this;
+    var creationCallback = function(success, result) {
+        if(success === true) {
+            cb(true, that);
         } else {
-            this.connection = new Worker(path_to_store_script);
+            cb(false, result);
         }
-        this.callbacksCounter = 1;
-        var that = this;
-        var creationCallback = function(success, result) {
-            if(success === true) {
-                cb(true, that);
-            } else {
-                cb(false, result);
-            }
-        };
-
-        this.rdf = RDFJSInterface.rdf;
-
-        //console.log("The worker");
-        var that = this;
-        this.connection.onmessage = function(event){
-            that.receive(event);
-        };
-        this.observingCallbacks = {};
-        this.callbacks = {'0': {'cb':creationCallback, 'fn':'create'}};
-        this.connection.postMessage({'fn':'create', 'args':args, 'callback':'0'});
     };
 
-    RDFStoreClient.RDFStoreClient.prototype.receive = function(packet) {
-        event = packet.data || packet;
-        //console.log("RECEIVED SOMETHING");
+    this.rdf = RDFJSInterface.rdf;
+    
+    this.connection.on('message',function(event){
+        that.receive(event);
+    });
+
+    this.observingCallbacks = {};
+    this.callbacks = {'0': {'cb':creationCallback, 'fn':'create'}};
+    this.connection.send({'fn':'create', 'args':args, 'callback':'0'});
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.receive = function(packet) {
+    event = packet.data || packet;
+    if(event.fn === 'workerRequest:NetworkTransport:load') {
+        var that = this;
+        var workerCallback = event['callback'];
+        var args = event['arguments'].concat(function(success, results){
+            that.connection.send({'fn':'workerRequestResponse', 'results':[success, results], 'callback':workerCallback});
+        });
+        NetworkTransport.load.apply(NetworkTransport,args);
+    } else {
         var callbackData = this.callbacks[event.callback];
         //console.log(packet);
         //console.log(callbackData);
@@ -38859,409 +42267,427 @@ if(!!Worker) {
                 callbackData.cb(event.event, event.result);
             }
         }
-    };
+    }
+};
 
-    RDFStoreClient.RDFStoreClient.prototype.registerCallback = function(fn, callback) {
-        var id = ''+this.callbacksCounter;
-        this.callbacks[id] = {'fn':fn, 'cb':callback};
-        this.callbacksCounter++;
+RDFStoreChildClient.RDFStoreClient.prototype.registerCallback = function(fn, callback) {
+    var id = ''+this.callbacksCounter;
+    this.callbacks[id] = {'fn':fn, 'cb':callback};
+    this.callbacksCounter++;
 
-        return id;
-    };
+    return id;
+};
 
-    RDFStoreClient.RDFStoreClient.prototype.execute = function() {
-        if(arguments.length === 3) {
-            this.executeWithEnvironment(arguments[0],
-                                        arguments[1],
-                                        arguments[2]);
-        } else if(arguments.length === 4) {
-            this.executeWithEnvironment(arguments[0],
-                                        arguments[1],
-                                        arguments[2],
-                                        arguments[3]);
-        } else {
+RDFStoreChildClient.RDFStoreClient.prototype.execute = function() {
+    if(arguments.length === 3) {
+        this.executeWithEnvironment(arguments[0],
+                                    arguments[1],
+                                    arguments[2]);
+    } else if(arguments.length === 4) {
+        this.executeWithEnvironment(arguments[0],
+                                    arguments[1],
+                                    arguments[2],
+                                    arguments[3]);
+    } else {
 
-            var queryString,callback;
+        var queryString,callback;
 
-            if(arguments.length === 1) {
-                queryString = arguments[0];
-                callback = function(){};
-
-            } else if(arguments.length === 2) {
-                queryString = arguments[0];
-                callback = arguments [1];
-            }
-
-            var id = this.registerCallback('execute',callback);
-
-            this.connection.postMessage({'fn':'execute', 'args':[queryString], 'callback':id});
-        }
-
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.insert = function() {
-        var graph;
-        var triples;
-        var callback;
         if(arguments.length === 1) {
-            triples = arguments[0];
-            this.connection.postMessage({'fn':'insert', 'args':[triples]})
+            queryString = arguments[0];
+            callback = function(){};
+
         } else if(arguments.length === 2) {
-            triples = arguments[0];
-            callback= arguments[1] || function(){};
-            var id = this.registerCallback('insert', callback);
-            this.connection.postMessage({'fn':'insert', 'args':[triples], 'callback':id})
-        } else if(arguments.length === 3) {
-            triples = arguments[0];
-            graph = arguments[1];
-            callback= arguments[2] || function(){};
-            var id = this.registerCallback('insert', callback);
-            this.connection.postMessage({'fn':'insert', 'args':[triples,graph], 'callback':id})
+            queryString = arguments[0];
+            callback = arguments [1];
+        }
+
+        var id = this.registerCallback('execute',callback);
+
+        this.connection.send({'fn':'execute', 'args':[queryString], 'callback':id});
+    }
+
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.insert = function() {
+    var graph;
+    var triples;
+    var callback;
+    if(arguments.length === 1) {
+        triples = arguments[0];
+        this.connection.send({'fn':'insert', 'args':[triples]})
+    } else if(arguments.length === 2) {
+        triples = arguments[0];
+        callback= arguments[1] || function(){};
+        var id = this.registerCallback('insert', callback);
+        this.connection.send({'fn':'insert', 'args':[triples], 'callback':id})
+    } else if(arguments.length === 3) {
+        triples = arguments[0];
+        graph = arguments[1];
+        callback= arguments[2] || function(){};
+        var id = this.registerCallback('insert', callback);
+        this.connection.send({'fn':'insert', 'args':[triples,graph], 'callback':id})
+    } else {
+        throw("The triples to insert, an optional graph and callback must be provided");
+    }
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.graph = function() {
+    var graphUri = null;
+    var callback = null;
+    if(arguments.length === 1) {
+        callback = arguments[0] || function(){};
+    } else if(arguments.length === 2) {
+        callback = arguments[1] || function(){};
+        graphUri = arguments[0];
+    } else {
+        throw("An optional graph URI and a callback function must be provided");
+    }
+
+    var that = this;
+    var wrapperCallback = function(success, toWrap) {
+        //console.log("CALLBACK!\n\n");
+        if(success) {
+            var triple;
+            for(var i=0; i<toWrap.triples.length; i++) {
+                triple = toWrap.triples[i];
+                toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
+                                                              that.adaptJSInterface(triple.predicate),
+                                                              that.adaptJSInterface(triple.object));
+            }                
+            callback(success, that.rdf.createGraph(toWrap.triples));
         } else {
-            throw("The triples to insert, an optional graph and callback must be provided");
+            callback(success,toWrap);
         }
     };
+    var id = this.registerCallback('insert', wrapperCallback);
+    if(graphUri == null) {
+        this.connection.send({'fn':'graph', 'args':[], 'callback':id})
+    } else {
+        this.connection.send({'fn':'graph', 'args':[graphUri], 'callback':id})
+    }
+};
 
-    RDFStoreClient.RDFStoreClient.prototype.graph = function() {
-        var graphUri = null;
-        var callback = null;
-        if(arguments.length === 1) {
-            callback = arguments[0] || function(){};
-        } else if(arguments.length === 2) {
-            callback = arguments[1] || function(){};
-            graphUri = arguments[0];
+RDFStoreChildClient.RDFStoreClient.prototype.node = function() {
+    var graphUri = null;
+    var callback = null;
+    var nodeUri  = null;
+    if(arguments.length === 2) {
+        nodeUri = arguments[0];
+        callback = arguments[1] || function(){};
+    } else if(arguments.length === 3) {
+        nodeUri = arguments[0];
+        graphUri = arguments[1];
+        callback = arguments[2] || function(){};
+    } else {
+        throw("An optional graph URI and a callback function must be provided");
+    }
+
+    var that = this;
+    var wrapperCallback = function(success, toWrap) {
+        //console.log("CALLBACK!\n\n");
+        if(success) {
+            var triple;
+            for(var i=0; i<toWrap.triples.length; i++) {
+                triple = toWrap.triples[i];
+                toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
+                                                              that.adaptJSInterface(triple.predicate),
+                                                              that.adaptJSInterface(triple.object));
+            }                
+            callback(success, that.rdf.createGraph(toWrap.triples));
         } else {
-            throw("An optional graph URI and a callback function must be provided");
+            callback(success,toWrap);
         }
+    };
+    var id = this.registerCallback('insert', wrapperCallback);
+    if(graphUri == null) {
+        this.connection.send({'fn':'node', 'args':[nodeUri], 'callback':id})
+    } else {
+        this.connection.send({'fn':'node', 'args':[nodeUri, graphUri], 'callback':id})
+    }
+
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.setPrefix = function(prefix, uri) {
+    this.rdf.setPrefix(prefix, uri)
+    this.connection.send({'fn':'rdf/setPrefix', 'args':[prefix, uri], 'callback':null})
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.setDefaultPrefix = function(uri) {
+    this.rdf.setDefaultPrefix(uri)
+    this.connection.send({'fn':'rdf/setDefaultPrefix', 'args':[uri], 'callback':null})
+};
+
+
+RDFStoreChildClient.RDFStoreClient.prototype['delete'] = function() {
+    var graph;
+    var triples;
+    var callback;
+    if(arguments.length === 1) {
+        triples = arguments[0];
+        this.connection.send({'fn':'delete', 'args':[triples]})
+    } else if(arguments.length === 2) {
+        triples = arguments[0];
+        callback= arguments[1] || function(){};
+        var id = this.registerCallback('delete', callback);
+        this.connection.send({'fn':'delete', 'args':[triples], 'callback':id})
+    } else if(arguments.length === 3) {
+        triples = arguments[0];
+        graph = arguments[1];
+        callback= arguments[2] || function(){};
+        var id = this.registerCallback('delete', callback);
+        this.connection.send({'fn':'delete', 'args':[triples,graph], 'callback':id})
+    } else {
+        throw("The triples to delete, an optional graph and callback must be provided");
+    }
+};
+
+
+RDFStoreChildClient.RDFStoreClient.prototype.clear = function() {
+    var graph;
+    var callback;
+    
+    if(arguments.length === 1) {
+        callback= arguments[0] || function(){};
+        var id = this.registerCallback('clear', callback);
+        this.connection.send({'fn':'clear', 'args':[], 'callback':id})
+    } else if(arguments.length === 2) {
+        graph = arguments[0];
+        callback= arguments[1] || function(){};
+        var id = this.registerCallback('clear', callback);
+        this.connection.send({'fn':'clear', 'args':[graph], 'callback':id})
+    } else {
+        throw("The optional graph and a callback must be provided");
+    }
+};
+
+
+/**
+ * Boolean value determining if loading RDF must produce
+ * triple add events and fire callbacks.
+ * Default is false.
+ */
+RDFStoreChildClient.RDFStoreClient.prototype.setBatchLoadEvents = function(mustFireEvents){
+    this.connection.send({'fn':'setBatchLoadEvents', 'args':[mustFireEvents]});
+};
+
+/**
+ * Registers a namespace prefix that will be automatically declared
+ * in all the queries
+ */
+RDFStoreChildClient.RDFStoreClient.prototype.registerDefaultNamespace = function(ns, prefix) {
+    this.connection.send({'fn':'registerDefaultNamespace', 'args':[ns,prefix]});
+};
+
+/**
+ * Registers the default namespaces declared in the RDF JS Interfaces
+ * specification in the default Profile.
+ */
+RDFStoreChildClient.RDFStoreClient.prototype.registerDefaultProfileNamespaces = function() {
+    this.connection.send({'fn':'registerDefaultProfileNamespaces', 'args':[]});
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.load = function(){
+    var mediaType;
+    var data;
+    var graph;
+    var callback;
+    
+    if(arguments.length === 3) {
+        mediaType = arguments[0];
+        data = arguments[1];
+        callback= arguments[2] || function(){};
+        var id = this.registerCallback('load', callback);
+        this.connection.send({'fn':'load', 'args':[mediaType, data], 'callback':id})
+    } else if(arguments.length === 4) {
+        mediaType = arguments[0];
+        data = arguments[1];
+        graph = arguments[2];
+        callback= arguments[3] || function(){};
+        var id = this.registerCallback('load', callback);
+        this.connection.send({'fn':'load', 'args':[mediaType, data, graph], 'callback':id})
+    } else if(arguments.length === 2) {
+        throw("The mediaType of the parser, the data a callback and an optional graph must be provided");
+    }
+    
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.startObservingQuery = function() {
+    var query = arguments[0];
+    var callback = arguments[1];
+    var endCallback = arguments[2];
+    if(endCallback!=null) {
+        var id1 = this.registerCallback('startObservingQuery', callback);
+        this.observingCallbacks[query] = id1;
+        var id2 = this.registerCallback('startObservingQueryEndCb', endCallback);
+        this.connection.send({'fn':'startObservingQuery', 'args':[query], 'callback':[id1,id2]})
+    } else {
+        var id1 = this.registerCallback('startObservingQuery', callback);
+        this.observingCallbacks[query] = id1;
+        this.connection.send({'fn':'startObservingQuery', 'args':[query], 'callback':[id1]})
+    }
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.stopObservingQuery = function(query) {
+    var id = this.observingCallbacks[query];
+    delete this.observingCallbacks[query];
+    delete this.callbacks[id];
+    this.connection.send({'fn':'stopObservingQuery', 'args':[query], 'callback':[]})
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.startObservingNode = function() {
+    var uri, graphUri, callback;
+
+    if(arguments.length === 2) {
+        uri = arguments[0];
+        callback = arguments[1];
 
         var that = this;
-        var wrapperCallback = function(success, toWrap) {
-            //console.log("CALLBACK!\n\n");
-            if(success) {
-                var triple;
-                for(var i=0; i<toWrap.triples.length; i++) {
-                    triple = toWrap.triples[i];
-                    toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
-                                                                  that.adaptJSInterface(triple.predicate),
-                                                                  that.adaptJSInterface(triple.object));
-                }                
-                callback(success, that.rdf.createGraph(toWrap.triples));
-            } else {
-                callback(success,toWrap);
-            }
-        };
-        var id = this.registerCallback('insert', wrapperCallback);
-        if(graphUri == null) {
-            this.connection.postMessage({'fn':'graph', 'args':[], 'callback':id})
-        } else {
-            this.connection.postMessage({'fn':'graph', 'args':[graphUri], 'callback':id})
-        }
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.node = function() {
-        var graphUri = null;
-        var callback = null;
-        var nodeUri  = null;
-        if(arguments.length === 2) {
-            nodeUri = arguments[0];
-            callback = arguments[1] || function(){};
-        } else if(arguments.length === 3) {
-            nodeUri = arguments[0];
-            graphUri = arguments[1];
-            callback = arguments[2] || function(){};
-        } else {
-            throw("An optional graph URI and a callback function must be provided");
-        }
-
-        var that = this;
-        var wrapperCallback = function(success, toWrap) {
-            //console.log("CALLBACK!\n\n");
-            if(success) {
-                var triple;
-                for(var i=0; i<toWrap.triples.length; i++) {
-                    triple = toWrap.triples[i];
-                    toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
-                                                                  that.adaptJSInterface(triple.predicate),
-                                                                  that.adaptJSInterface(triple.object));
-                }                
-                callback(success, that.rdf.createGraph(toWrap.triples));
-            } else {
-                callback(success,toWrap);
-            }
-        };
-        var id = this.registerCallback('insert', wrapperCallback);
-        if(graphUri == null) {
-            this.connection.postMessage({'fn':'node', 'args':[nodeUri], 'callback':id})
-        } else {
-            this.connection.postMessage({'fn':'node', 'args':[nodeUri, graphUri], 'callback':id})
-        }
-
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.setPrefix = function(prefix, uri) {
-        this.rdf.setPrefix(prefix, uri)
-        this.connection.postMessage({'fn':'rdf/setPrefix', 'args':[prefix, uri], 'callback':null})
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.setDefaultPrefix = function(uri) {
-        this.rdf.setDefaultPrefix(uri)
-        this.connection.postMessage({'fn':'rdf/setDefaultPrefix', 'args':[uri], 'callback':null})
-    };
-
-
-    RDFStoreClient.RDFStoreClient.prototype['delete'] = function() {
-        var graph;
-        var triples;
-        var callback;
-        if(arguments.length === 1) {
-            triples = arguments[0];
-            this.connection.postMessage({'fn':'delete', 'args':[triples]})
-        } else if(arguments.length === 2) {
-            triples = arguments[0];
-            callback= arguments[1] || function(){};
-            var id = this.registerCallback('delete', callback);
-            this.connection.postMessage({'fn':'delete', 'args':[triples], 'callback':id})
-        } else if(arguments.length === 3) {
-            triples = arguments[0];
-            graph = arguments[1];
-            callback= arguments[2] || function(){};
-            var id = this.registerCallback('delete', callback);
-            this.connection.postMessage({'fn':'delete', 'args':[triples,graph], 'callback':id})
-        } else {
-            throw("The triples to delete, an optional graph and callback must be provided");
-        }
-    };
-
-
-    RDFStoreClient.RDFStoreClient.prototype.clear = function() {
-        var graph;
-        var callback;
-     
-        if(arguments.length === 1) {
-            callback= arguments[0] || function(){};
-            var id = this.registerCallback('clear', callback);
-            this.connection.postMessage({'fn':'clear', 'args':[], 'callback':id})
-        } else if(arguments.length === 2) {
-            graph = arguments[0];
-            callback= arguments[1] || function(){};
-            var id = this.registerCallback('clear', callback);
-            this.connection.postMessage({'fn':'clear', 'args':[graph], 'callback':id})
-        } else {
-            throw("The optional graph and a callback must be provided");
-        }
-    };
-
-
-    /**
-     * Boolean value determining if loading RDF must produce
-     * triple add events and fire callbacks.
-     * Default is false.
-     */
-    RDFStoreClient.RDFStoreClient.prototype.setBatchLoadEvents = function(mustFireEvents){
-        this.connection.postMessage({'fn':'setBatchLoadEvents', 'args':[mustFireEvents]});
-    };
-
-    /**
-     * Registers a namespace prefix that will be automatically declared
-     * in all the queries
-     */
-    RDFStoreClient.RDFStoreClient.prototype.registerDefaultNamespace = function(ns, prefix) {
-        this.connection.postMessage({'fn':'registerDefaultNamespace', 'args':[ns,prefix]});
-    };
-     
-    /**
-     * Registers the default namespaces declared in the RDF JS Interfaces
-     * specification in the default Profile.
-     */
-    RDFStoreClient.RDFStoreClient.prototype.registerDefaultProfileNamespaces = function() {
-        this.connection.postMessage({'fn':'registerDefaultProfileNamespaces', 'args':[]});
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.load = function(){
-        var mediaType;
-        var data;
-        var graph;
-        var callback;
-     
-        if(arguments.length === 3) {
-            mediaType = arguments[0];
-            data = arguments[1];
-            callback= arguments[2] || function(){};
-            var id = this.registerCallback('load', callback);
-            this.connection.postMessage({'fn':'load', 'args':[mediaType, data], 'callback':id})
-        } else if(arguments.length === 4) {
-            mediaType = arguments[0];
-            data = arguments[1];
-            graph = arguments[2];
-            callback= arguments[3] || function(){};
-            var id = this.registerCallback('load', callback);
-            this.connection.postMessage({'fn':'load', 'args':[mediaType, data, graph], 'callback':id})
-        } else if(arguments.length === 2) {
-            throw("The mediaType of the parser, the data a callback and an optional graph must be provided");
-        }
-     
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.startObservingQuery = function() {
-        var query = arguments[0];
-        var callback = arguments[1];
-        var endCallback = arguments[2];
-        if(endCallback!=null) {
-            var id1 = this.registerCallback('startObservingQuery', callback);
-            this.observingCallbacks[query] = id1;
-            var id2 = this.registerCallback('startObservingQueryEndCb', endCallback);
-            this.connection.postMessage({'fn':'startObservingQuery', 'args':[query], 'callback':[id1,id2]})
-        } else {
-            var id1 = this.registerCallback('startObservingQuery', callback);
-            this.observingCallbacks[query] = id1;
-            this.connection.postMessage({'fn':'startObservingQuery', 'args':[query], 'callback':[id1]})
-        }
-    };
-     
-    RDFStoreClient.RDFStoreClient.prototype.stopObservingQuery = function(query) {
-        var id = this.observingCallbacks[query];
-        delete this.observingCallbacks[query];
-        delete this.callbacks[id];
-        this.connection.postMessage({'fn':'stopObservingQuery', 'args':[query], 'callback':[]})
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.startObservingNode = function() {
-        var uri, graphUri, callback;
-
-        if(arguments.length === 2) {
-            uri = arguments[0];
-            callback = arguments[1];
-
-            var that = this;
-            var wrapperCallback = function(toWrap) {
-                //console.log("CALLBACK!\n\n");
-                var triple;
-                for(var i=0; i<toWrap.triples.length; i++) {
-                    triple = toWrap.triples[i];
-                    toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
-                                                                  that.adaptJSInterface(triple.predicate),
-                                                                  that.adaptJSInterface(triple.object));
-                }                
-                callback(that.rdf.createGraph(toWrap.triples));
-            };
-
-            var id = this.registerCallback('startObservingNode', wrapperCallback);
-            this.observingCallbacks[callback] = id;
-
-            this.connection.postMessage({'fn':'startObservingNode', 'args':[uri], 'callback':id})
-        } else if(arguments.length === 3) {
-            uri = arguments[0];
-            graphUri = arguments[1];
-            callback = arguments[2];
-
-            var that = this;
-            var wrapperCallback = function(toWrap) {
-                //console.log("CALLBACK!\n\n");
-                var triple;
-                for(var i=0; i<toWrap.triples.length; i++) {
-                    triple = toWrap.triples[i];
-                    toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
-                                                                  that.adaptJSInterface(triple.predicate),
-                                                                  that.adaptJSInterface(triple.object));
-                }                
-                callback(that.rdf.createGraph(toWrap.triples));
-            };
-
-            var id = this.registerCallback('startObservingNode', wrapperCallback);
-            this.observingCallbacks[callback] = id;
-
-            this.connection.postMessage({'fn':'startObservingNode', 'args':[uri,graphUri], 'callback':id})
-        }
-    };
-     
-    RDFStoreClient.RDFStoreClient.prototype.stopObservingNode = function(callback) {
-        var id = this.observingCallbacks[callback];
-        delete this.observingCallbacks[callback];
-        delete this.callbacks[id];
-        //console.log("STOP OBSERVING "+id);
-        this.connection.postMessage({'fn':'stopObservingNode', 'args':[id], 'callback':[]})
-    };
-
-    RDFStoreClient.RDFStoreClient.prototype.subscribe = function(s, p, o, g, callback) {
-        var that = this;
-        var wrapperCallback = function(event,triples) {
+        var wrapperCallback = function(toWrap) {
             //console.log("CALLBACK!\n\n");
             var triple;
-            for(var i=0; i<triples.length; i++) {
-                triple = triples[i];
-                triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
-                                                       that.adaptJSInterface(triple.predicate),
-                                                       that.adaptJSInterface(triple.object));
+            for(var i=0; i<toWrap.triples.length; i++) {
+                triple = toWrap.triples[i];
+                toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
+                                                              that.adaptJSInterface(triple.predicate),
+                                                              that.adaptJSInterface(triple.object));
             }                
-            callback(event,triples);
+            callback(that.rdf.createGraph(toWrap.triples));
         };
-        var id = this.registerCallback('subscribe', wrapperCallback);
+
+        var id = this.registerCallback('startObservingNode', wrapperCallback);
         this.observingCallbacks[callback] = id;
 
-        this.connection.postMessage({'fn':'subscribe', 'args':[s,p,o,g], 'callback':id});
-    };
-     
-    RDFStoreClient.RDFStoreClient.prototype.unsubscribe = function(callback) {
-        var id = this.observingCallbacks[callback];
-        delete this.observingCallbacks[callback];
-        delete this.callbacks[id];
-        //console.log("STOP OBSERVING "+id);
-        this.connection.postMessage({'fn':'unsubscribe', 'args':[id], 'callback':[]})
-    };
-         
-    RDFStoreClient.RDFStoreClient.prototype.registeredGraphs = function(callback) {
+        this.connection.send({'fn':'startObservingNode', 'args':[uri], 'callback':id})
+    } else if(arguments.length === 3) {
+        uri = arguments[0];
+        graphUri = arguments[1];
+        callback = arguments[2];
+
         var that = this;
-        var wrapperCallback = function(success, graphs) {
+        var wrapperCallback = function(toWrap) {
             //console.log("CALLBACK!\n\n");
-            if(success) {
-                var triple;
-                for(var i=0; i<graphs.length; i++) {
-                    graph = graphs[i]
-                    graphs[i] = that.adaptJSInterface(graph);
-                }                
-                callback(success, graphs);
-            } else {
-                callback(success,graphs);
-            }
+            var triple;
+            for(var i=0; i<toWrap.triples.length; i++) {
+                triple = toWrap.triples[i];
+                toWrap.triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
+                                                              that.adaptJSInterface(triple.predicate),
+                                                              that.adaptJSInterface(triple.object));
+            }                
+            callback(that.rdf.createGraph(toWrap.triples));
         };
 
-        var id = this.registerCallback('registeredGraphs', wrapperCallback);
-        this.connection.postMessage({'fn':'registeredGraphs', 'args':[], 'callback':id})
-    };
+        var id = this.registerCallback('startObservingNode', wrapperCallback);
+        this.observingCallbacks[callback] = id;
 
-    // helper functions
-    RDFStoreClient.RDFStoreClient.prototype.adaptJSInterface = function(node) {
-        if(node.interfaceName === 'BlankNode') {
-            return new RDFJSInterface.BlankNode(node.bnodeId);
-        } else if(node.interfaceName === 'Literal') {
-            return new RDFJSInterface.Literal(node.nominalValue, node.language, node.datatype);
-        } else if(node.interfaceName === 'NamedNode') {
-            return new RDFJSInterface.NamedNode(node.nominalValue);
+        this.connection.send({'fn':'startObservingNode', 'args':[uri,graphUri], 'callback':id})
+    }
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.stopObservingNode = function(callback) {
+    var id = this.observingCallbacks[callback];
+    delete this.observingCallbacks[callback];
+    delete this.callbacks[id];
+    //console.log("STOP OBSERVING "+id);
+    this.connection.send({'fn':'stopObservingNode', 'args':[id], 'callback':[]})
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.subscribe = function(s, p, o, g, callback) {
+    var that = this;
+    var wrapperCallback = function(event,triples) {
+        //console.log("CALLBACK!\n\n");
+        var triple;
+        for(var i=0; i<triples.length; i++) {
+            triple = triples[i];
+            triples[i] = new RDFJSInterface.Triple(that.adaptJSInterface(triple.subject),
+                                                   that.adaptJSInterface(triple.predicate),
+                                                   that.adaptJSInterface(triple.object));
+        }                
+        callback(event,triples);
+    };
+    var id = this.registerCallback('subscribe', wrapperCallback);
+    this.observingCallbacks[callback] = id;
+
+    this.connection.send({'fn':'subscribe', 'args':[s,p,o,g], 'callback':id});
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.unsubscribe = function(callback) {
+    var id = this.observingCallbacks[callback];
+    delete this.observingCallbacks[callback];
+    delete this.callbacks[id];
+    //console.log("STOP OBSERVING "+id);
+    this.connection.send({'fn':'unsubscribe', 'args':[id], 'callback':[]})
+};
+
+RDFStoreChildClient.RDFStoreClient.prototype.registeredGraphs = function(callback) {
+    var that = this;
+    var wrapperCallback = function(success, graphs) {
+        //console.log("CALLBACK!\n\n");
+        if(success) {
+            var triple;
+            for(var i=0; i<graphs.length; i++) {
+                graph = graphs[i]
+                graphs[i] = that.adaptJSInterface(graph);
+            }                
+            callback(success, graphs);
+        } else {
+            callback(success,graphs);
         }
     };
 
-    // make possible for clients to test if this i being executed inside a connection
-    RDFStoreClient.RDFStoreClient.prototype.isWebWorkerConnection = true;
-}
+    var id = this.registerCallback('registeredGraphs', wrapperCallback);
+    this.connection.send({'fn':'registeredGraphs', 'args':[], 'callback':id})
+};
 
-// end of ./src/js-connection/src/rdfstore_client.js 
+// helper functions
+RDFStoreChildClient.RDFStoreClient.prototype.adaptJSInterface = function(node) {
+    if(node.interfaceName === 'BlankNode') {
+        return new RDFJSInterface.BlankNode(node.bnodeId);
+    } else if(node.interfaceName === 'Literal') {
+        return new RDFJSInterface.Literal(node.nominalValue, node.language, node.datatype);
+    } else if(node.interfaceName === 'NamedNode') {
+        return new RDFJSInterface.NamedNode(node.nominalValue);
+    }
+};
+
+// make possible for clients to test if this is being executed inside a connection
+RDFStoreChildClient.RDFStoreClient.prototype.isWebWorkerConnection = true;
+
+
+// end of ./src/js-connection/src/rdfstore_child_client.js 
 // exports
 var Store = {};
 
-// imports
-//var Worker = require('webworker');
+/**
+ * @namespace
+ * 
+ * The Store module defines the public interface to the RDF store.
+ */
 
-Store.VERSION = "0.4.9";
+// imports
+var RDFStoreClient = RDFStoreChildClient;
+/**
+ * Version of the store
+ */
+Store.VERSION = "0.5.5";
 
 /**
- * Tries to create a new RDFStore instance that will be
- * executed in a web worker.
+ * Create a new RDFStore instance that will be
+ * executed in a web worker in the browser or a new process
+ * in Node.js.
+ * <br/>
+ * <br/>
  * The first argument to this function is the URL/FS location 
- * of the store script. 
+ * of the store script.
+ * <br/>
+ * <br/>
  * This parameter is mandatory in the browser. It is safe to
  * ignore this parameter in Node.js.
+ * <br/>
+ * <br/>
  * If support for web workers is not present, a regular
  * store object will be initialized and returned.
+ * <br/>
+ * <br/>
  *
  * @param {String} [scriptPath] URL of the RDFStore script
  * @param {Object[]} [args] Arguments to be passed to the store that will be created
@@ -39272,7 +42698,7 @@ Store.connect = function() {
     if(arguments.length == 1) {
         path = __dirname;
         args = {};
-        callback = arguments[0]
+        callback = arguments[0];
     } if(arguments.length == 2) {
         if(typeof(arguments[0]) === 'string') {
             path = arguments[0];
@@ -39298,13 +42724,31 @@ Store.connect = function() {
             });
         }
     } catch(e) {
-        console.log(e)
         Store.create(args,function(connection){
             callback(false, connection);
         });        
     }
 };
 
+/**
+ * Creates a new instance of the store.
+ *
+ * The function accepts two optional arguments.
+ * <br/>
+ * If only one argument is passed it must be a
+ * callback function that will be invoked when the
+ * store had been created.<br/>
+ * <br/>
+ * If two arguments are passed the first one must
+ * be a map of configuration parameters for the
+ * store, and the second one the callback function.<br/>
+ * <br/>
+ * Take a look at the Store constructor function for
+ * a detailed list of possible configuration parameters.<br/>
+ *
+ * @param {Object[]} [args] Arguments to be passed to the store that will be created
+ * @param {Function} [callback] Callback function that will be invoked with an error flag and the connection/store object.
+ */
 Store.create = function(){
     if(arguments.length == 1) {
         return new Store.Store(arguments[0]);
@@ -39316,13 +42760,25 @@ Store.create = function(){
 };
 
 /**
- * Creates a new store.
+ * Creates a new store.<br/>
+ * <br/>
+ * It accepts two optional arguments, a map of configuration
+ * options for the store and a callback function.<br/>
  *
+ * @constructor 
  * @param {Function} [callback] Callback that will be invoked when the store has been created
  * @param {Object} [params]
- *  - persistent:  should use persistence?
- *  - name: if using persistence, the name for this store
- *  - maxCacheSize: if using persistence, maximum size of the index cache
+ * <ul>
+ *  <li> persistent:  should the store use persistence? </li>
+ *  <li> treeOrder: in versions of the store backed by the native indexing system, the order of the BTree indices</li>
+ *  <li> name: when using persistence, the name for this store. In the MongoDB backed version, name of the DB used by the store. By default <code>'rdfstore_js'</code> is used</li>
+ *  <li> overwrite: clears the persistent storage </li>
+ *  <li> maxCacheSize: if using persistence, maximum size of the index cache </li>
+ *  <li> engine: the persistent storage to use, a value <code>mongodb</code> selects the MongoDB engine</li>
+ *  <li> mongoDomain: when <code>engine=mongodb</code>, server domain name or IP address where the MongoDB server backing the store is running. By default <code>'127.0.0.1'</code> is used</li>
+ *  <li> mongoPort: when <code>engine=mongodb</code>, port where the MongoDB server is running. By default <code>27017</code> is used</li>
+ *  <li> mongoOptions: when <code>engine=mongodb</code>, additional options for the MongoDB driver. By default <code>{}</code> is used</li>
+ * </ul>
  */
 Store.Store = function(arg1, arg2) {
     var callback = null;
@@ -39344,51 +42800,76 @@ Store.Store = function(arg1, arg2) {
         params['treeOrder'] = 15;
     }
 
-    this.rdf = RDFJSInterface.rdf;
     this.functionMap = {};
 
     var that = this;
-    new Lexicon.Lexicon(function(lexicon){
-        if(params['overwrite'] === true) {
-            // delete lexicon values
-            lexicon.clear();
-        }
-        new QuadBackend.QuadBackend(params, function(backend){
+    if(params['engine']==='mongodb') {
+        this.isMongodb = true;
+        this.engine = new MongodbQueryEngine.MongodbQueryEngine(params);
+        this.engine.readConfiguration(function(){
             if(params['overwrite'] === true) {
-                // delete index values
-                backend.clear();
-            }
-            params.backend = backend;
-            params.lexicon =lexicon;
-            that.engine = new QueryEngine.QueryEngine(params);      
-            if(callback) {
+                that.engine.clean(function(){
+                    callback(that);
+                });
+            } else {
                 callback(that);
             }
-        })
-    },
-    params['name']);
+        });
+    } else {
+        new Lexicon.Lexicon(function(lexicon){
+            if(params['overwrite'] === true) {
+                // delete lexicon values
+                lexicon.clear();
+            }
+            new QuadBackend.QuadBackend(params, function(backend){
+                if(params['overwrite'] === true) {
+                    // delete index values
+                    backend.clear();
+                }
+                params.backend = backend;
+                params.lexicon =lexicon;
+                that.engine = new QueryEngine.QueryEngine(params);      
+                if(callback) {
+                    callback(that);
+                }
+            });
+        },params['name']);
+    }
 };
 
 
 /**
- * Executes a query in the store.
- * There are two possible way of invoking this function,
+ * An instance of RDF JS Interface <code>RDFEnvironment</code>
+ * associated to this graph instance.
+ */
+Store.Store.prototype.rdf = RDFJSInterface.rdf;
+
+/**
+ * Executes a query in the store.<br/>
+ * <br/>
+ * There are two possible ways of invoking this function,
  * providing a pair of arrays of namespaces that will be
  * used to compute the union of the default and named
  * dataset, or without them.
+ * <br/>
+ * <br/>
  * Both invocations receive as an optional last parameter
  * a callback function that will receive the return status
  * of the query and the results.
- *
- * @arguments:
- * 1)
+ * <br/>
+ * <br/>
+ * Results can have different formats:
+ * <ul>
+ *  <li> SELECT queries: array of binding maps </li>
+ *  <li> CONSTRUCT queries: RDF JS Interface Graph object </li>
+ *  <li> ASK queries: JS boolean value </li>
+ *  <li> LOAD/INSERT... queries: Number of triples modified/inserted </li>
+ * </ul>
+ *  
+ * @arguments: 
  * @param {String} query
- * @param {Function} [callback]
- * 
- * 2)
- * @param {String} query
- * @param {String} URIs default namespaces
- * @param {String} URIs named namespaces
+ * @param {String} [defaultURIs] default namespaces
+ * @param {String} [namespacesURIs] named namespaces
  * @param {Function} [callback]
  */
 Store.Store.prototype.execute = function() {
@@ -39408,7 +42889,7 @@ Store.Store.prototype.execute = function() {
      
         if(arguments.length === 1) {
             queryString = arguments[0];
-            callback = function(){};
+            var callback = function(){};
         } else if(arguments.length === 2) {
             queryString = arguments[0];
             callback = arguments [1];
@@ -39417,26 +42898,59 @@ Store.Store.prototype.execute = function() {
     }
 };
 
+/**
+ * A variation of the execute function that expects 
+ * arguments containing values for the default and named 
+ * graphs that will be used in the query.
+ *
+ *
+ * @arguments:
+ * @param {String} query
+ * @param {String} URIs default namespaces
+ * @param {String} URIs named namespaces
+ * @param {Function} [callback]
+ */
 Store.Store.prototype.executeWithEnvironment = function() {
-    var queryString;
-    var callback;
-    var defaultGraphs;
-    var namedGraphs;
+    var queryString, defaultGraphs, namedGraphs;
 
     if(arguments.length === 3) {
         queryString   = arguments[0];
-        callback      = function(){};
+        // JSDoc fails if this is pushed outside 
+        var callback  = function(){};
         defaultGraphs = arguments[1];
         namedGraphs   = arguments[2];
     } else if(arguments.length === 4) {
         queryString   = arguments[0];
-        callback      = arguments [3];
+        var callback      = arguments [3];
         defaultGraphs = arguments[1];
         namedGraphs   = arguments[2];
     }
-    this.engine.execute(queryString, callback, defaultGraphs, namedGraphs);
+    var defaultGraphsNorm = [];
+    var namedGraphsNorm = [];
+    for(var i=0; i<defaultGraphs.length; i++) {
+        defaultGraphsNorm.push({'token':'uri','value':defaultGraphs[i]})
+    }
+    for(var i=0; i<namedGraphs.length; i++) {
+        namedGraphsNorm.push({'token':'uri','value':namedGraphs[i]})
+    }
+    this.engine.execute(queryString, callback, defaultGraphsNorm, namedGraphsNorm);
 };
 
+/**
+ * Retrieves all the quads belonging to a certain graph
+ * in the store as a RDF JS Interface Graph object.<br/>
+ * <br/>
+ * The function accepts as mandatory parameter a callback
+ * function that will receive the returned graph.<br/>
+ * <br/>
+ * Optionally, the URI of the graph can also be passed as
+ * the first argument. If no graph is specified, the
+ * default graph will be returned.<br/>
+ *
+ * @arguments
+ * @param {String} [graphURI] If this parameter is missing, the default graph will be returned
+ * @param {Functon} callback
+ */
 Store.Store.prototype.graph = function() {
     var graphUri = null;
     var callback = null;
@@ -39457,9 +42971,28 @@ Store.Store.prototype.graph = function() {
     this.engine.execute("CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + graphUri + "> { ?s ?p ?o } }", callback);
 };
 
-
+/**
+ * Retrieves all the quads belonging to a certain node
+ * in the store as a RDF JS Interface Graph object containing
+ * the collection of triples whose subject is the provided
+ * node URI.<br/>
+ * <br/>
+ * The function accepts as mandatory parameters the node URI and 
+ * a callback unction that will receive the returned node.<br/>
+ * <br/>
+ * Optionally, the URI of the graph where the node is contained 
+ * can also be passed as the first argument. <br/>
+ * <br/>
+ * If no graph is specified, the node will be looked into the 
+ * default graph.<br/>
+ *
+ * @arguments
+ * @param {String} nodeURI URI of the node to look for
+ * @param {String} [graphURI] If this parameter is missing, the node will be looked into the default graph
+ * @param {Functon} callback
+ */
 Store.Store.prototype.node = function() {
-     var graphUri = null;
+    var graphUri = null;
     var callback = null;
     var nodeUri  = null;
     if(arguments.length === 2) {
@@ -39471,7 +43004,7 @@ Store.Store.prototype.node = function() {
         graphUri = arguments[1];
         callback = arguments[2] || function(){};
     } else {
-        throw("An optional graph URI and a callback function must be provided");
+        throw("An optional graph URI, node URI and a callback function must be provided");
     }
 
     if(this.rdf.resolve(graphUri) != null) {
@@ -39485,6 +43018,30 @@ Store.Store.prototype.node = function() {
     this.engine.execute("CONSTRUCT { <" + nodeUri + "> ?p ?o } WHERE { GRAPH <" + graphUri + "> { <" + nodeUri + "> ?p ?o } }", callback);
 };
 
+/**
+ * Associates an event listener function to a node URI. Every time the collection
+ * of triples whose subject is the specified node URI changes, because an
+ * insertion or deletion, the provided callback function will be invoked
+ * receiving as a parameter a RDF JS Interface Graph object with the new
+ * collection of triples.<br/>
+ * <br/>
+ * The function accepts two mandatory arguments, the URI of the node to observe
+ * and the function that will receive the event notifications. An optional
+ * third parameter, consisting of a callback function, can be passed and will be invoked
+ * once the store had correctly configured the event listener.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the *setBatchLoadEvents* function with a true argument.<br/>
+ *<br/>
+ * The event listener function can be removed using the stopObservingNode function.
+ *
+ * @arguments
+ * @param {String} nodeURI URI of the node to observe
+ * @param {Function} eventListener Function that will be notified with the events
+ * @param {Function} [callback] Function that will be invoked, once the event listener had been correctly set up.
+ */
 Store.Store.prototype.startObservingNode = function() {
     var uri, graphUri, callback;
 
@@ -39500,10 +43057,38 @@ Store.Store.prototype.startObservingNode = function() {
     }
 };
 
+/**
+ * Removes a callback function associated to a node.<br/>
+ * The event listener function object must be passed as an argument.<br/>
+ *
+ * @arguments
+ * @param {Function} eventListener The event listener function to remove, the same passed as an argument to startObservingNode
+ */
 Store.Store.prototype.stopObservingNode = function(callback) {
     this.engine.callbacksBackend.stopObservingNode(callback);
 };
 
+/**
+ * Associates an event listener function to a SPARQL SELECT or
+ * CONSTRUCT query.<br/>
+ * Every time an update (insert, delete...) query modified the 
+ * triples in the store in a way that modifies the output of the
+ * query, the event listener will be invoked with an updated 
+ * result.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the <code>setBatchLoadEvents</code> function with a true argument.<br/>
+ *<br/>
+ * The event listener function can be removed invoking the
+ * <code>stopObservingQuery</code> function. 
+ *
+ * @arguments
+ * @param {String} query SELECT or CONSTRUCT SPARQL query
+ * @param {Function} eventListener the function that will receive the notifications
+ * @param {Function} [callback] optional function that will be invoked when the stored had set up the event listener function.
+ */
 Store.Store.prototype.startObservingQuery = function() {
     var query = arguments[0];
     var callback = arguments[1];
@@ -39515,10 +43100,40 @@ Store.Store.prototype.startObservingQuery = function() {
     }
 };
 
+/**
+ * Removes a callback function associated to a SPARQL query.<br/>
+ * The event listener function object must be passed as an argument.
+ *
+ * @arguments
+ * @param {Function} eventListener The event listener function to remove, the same passed as an argument to startObservingQuery
+ */
 Store.Store.prototype.stopObservingQuery = function(query) {
     this.engine.callbacksBackend.stopObservingQuery(query);
 };
 
+/**
+ * Associates an event listener to a pattern expressed as the
+ * subject, predicate, object and graph string parameters passed
+ * to the function. To match any value in that position, a <code>null</code>
+ * value can be passed as an argument. e.g. <code>subscribe(null, null, null, g, cb)</code>,
+ * will be notified with any change in the g graph.<br/>
+ * The graph component of the pattern does not support a <code>null</code> value.<br/>
+ *<br/>
+ * Results will be notified as an Array of RDF JS Interface
+ * <code>Triple</code> objects.<br/>
+ *<br/>
+ * LOAD queries, batch loading data into the store, do not 
+ * trigger events by default. If you wish to be notified
+ * by changes triggered by this kind of queries, invoke
+ * the <code>setBatchLoadEvents</code> function with a true argument.
+ *
+ * @arguments
+ * @param {String} s subject or null for any subject
+ * @param {String} p predicate or null for any predicate
+ * @param {String} o object or null for any object
+ * @param {String} g graph or null for any graph
+ * @param {Function} event listener function that will be notified when a change occurs
+ */
 Store.Store.prototype.subscribe = function(s, p, o, g, callback) {
     var adapterCb = function(event,triples){
         var acum = [];
@@ -39537,26 +43152,68 @@ Store.Store.prototype.subscribe = function(s, p, o, g, callback) {
         }
 
         callback(event,acum);
-    }
+    };
 
     this.functionMap[callback] = adapterCb;
     this.engine.callbacksBackend.subscribe(s,p,o,g,adapterCb,function(){});
 };
 
+/**
+ * Removes an event listener associated to a certain pattern.
+ * The function passed as an argument to <code>subscribe</code> must be 
+ * passed as an argument.
+ *
+ * @arguments
+ * @param {Function} callback The event listener to be removed
+ */
 Store.Store.prototype.unsubscribe = function(callback) {
     var adapterCb = this.functionMap[callback];
     this.engine.callbacksBackend.unsubscribe(adapterCb);
     delete this.functionMap[callback];
 };
 
+/**
+ * Register a combination of prefix and URI fragment in the default instance
+ * of the RDF JS Interface API <code>RDFEnvironment</code> object associated
+ * to the store and available through the <code>storeInstance.rdf</code> property.
+ *
+ * @arguments
+ * @param {String} prefix The prefix to be associated
+ * @param {String} URIFragment URI fragment the provided prefix will be resolved
+ */
 Store.Store.prototype.setPrefix = function(prefix, uri) {
-    this.rdf.setPrefix(prefix, uri)
+    this.rdf.setPrefix(prefix, uri);
 };
 
+/**
+ * Defines the URI that will be used by default by the RDF JS Interface
+ * API <code>RDFEnvironment</code> object associated to the store and available
+ * through the <code>storeInstance.rdf</code> property.
+ *
+ * @arguments
+ * @param {String} URIFragment The URI fragment will be used by default
+ */
 Store.Store.prototype.setDefaultPrefix = function(uri) {
-    this.rdf.setDefaultPrefix(uri)
+    this.rdf.setDefaultPrefix(uri);
 };
 
+/**
+ * Inserts a RDF JS Interface API <code>Graph</code> object into the store.
+ * The function receives a mandatory <code>Graph</code> object whose triples
+ * will be inserted. Optionally, a URI string for a graph and a 
+ * callback function can be passed as arguments.<br/>
+ * <br/>
+ * If no graph URI is specified, triples will be inserted into the
+ * default graph.<br/>
+ * <br/>
+ * If the callback function is specified, it will be invoked when all the
+ * triples had been inserted into the store.<br/>
+ *
+ * @arguments
+ * @param {RDFJSInterface.Graph} triples a RDF JS Interface <code>Graph</code> object
+ * @param {String} [graphURI] URI of the graph where the triples will be inserted. If it is missing, triples will be inserted in the default graph
+ * @param {String} [callback] A callback function that will be invoked with a success notification and the number of triples inserted
+ */ 
 Store.Store.prototype.insert = function() {
     var graph;
     var triples;
@@ -39610,6 +43267,23 @@ Store.Store.prototype._nodeToQuery = function(term) {
     }
 };
 
+/**
+ * Removes the triples in a RDF JS Interface API <code>Graph</code> object from the store.
+ * The function receives a mandatory <code>Graph</code> object whose triples
+ * will be removed. Optionally, a URI string for a graph and a 
+ * callback function can be passed as arguments.<br/>
+ * <br/>
+ * If no graph URI is specified, triples will be removed from the
+ * default graph.<br/>
+ * <br/>
+ * If the callback function is specified, it will be invoked when all the
+ * triples had been removed from the store.
+ *
+ * @arguments
+ * @param {RDFJSInterface.Graph} triples a RDF JS Interface <code>Graph</code> object
+ * @param {String} [graphURI] URI of the graph where the triples will be removed from. If it is missing, triples will be removed from the default graph
+ * @param {String} [callback] A callback function that will be invoked with a success notification
+ */ 
 Store.Store.prototype['delete'] = function() {
 
     var graph;
@@ -39644,11 +43318,27 @@ Store.Store.prototype['delete'] = function() {
     this.engine.execute(query, callback);
 };
 
+/** 
+ * Removes all the triples stored in a graph.
+ * 
+ * The URI of the graph and a callback function can be
+ * optinally passed as parameters.<br/>
+ * <br/>
+ * If no graph URI is specified, all triples in the 
+ * default graph will be removed.
+ *
+ * @arguments
+ * @param {String} [graph] the URI of the graph the triples must be removed from
+ * @param {Function} [callback] a function that will be invoked with a success notification
+ */
 Store.Store.prototype.clear = function() {
     var graph;
     var callback;
 
-    if(arguments.length === 1) {
+    if(arguments.length === 0) {
+        graph = this.rdf.createNamedNode(this.engine.lexicon.defaultGraphUri);
+        var callback= function(){};
+    } else if(arguments.length === 1) {
         graph = this.rdf.createNamedNode(this.engine.lexicon.defaultGraphUri);
         callback= arguments[0] || function(){};
     } else if(arguments.length === 2) {
@@ -39664,8 +43354,11 @@ Store.Store.prototype.clear = function() {
 
 /**
  * Boolean value determining if loading RDF must produce
- * triple add events and fire callbacks.
- * Default is false.
+ * triple add events and fire callbacks.<br/>
+ * Default value is false.
+ *
+ * @arguments
+ * @param {boolean} mustFireEvents true/false value.
  */
 Store.Store.prototype.setBatchLoadEvents = function(mustFireEvents){
     this.engine.eventsOnBatchLoad = mustFireEvents;
@@ -39673,7 +43366,14 @@ Store.Store.prototype.setBatchLoadEvents = function(mustFireEvents){
 
 /**
  * Registers a namespace prefix that will be automatically declared
- * in all the queries
+ * in all the queries.<br/>
+ * <br/>
+ * The prefix will also be inserte in the default <code>RDFEnvironment</code> object
+ * associated to the <code>rdf</code> property of the store instance.
+ *
+ * @arguments
+ * @param {String} ns the name space to be regsitered
+ * @param {String} prefix the URI fragment associated to the name space
  */
 Store.Store.prototype.registerDefaultNamespace = function(ns, prefix) {
     this.rdf.prefixes.set(ns,prefix);
@@ -39691,6 +43391,31 @@ Store.Store.prototype.registerDefaultProfileNamespaces = function() {
     }
 };
 
+/**
+ * Load triples into a graph in the store. Data can be passed directly to the method
+ * or a remote URI speifying where the data is located can be used.<br/>
+ *<br/>
+ * If the data is passed directly to the load function, the media type stating the format
+ * of the data must also be passed to the function.<br/>
+ *<br/>
+ * If an URI is passed as a parameter, the store will attempt to perform content negotiation
+ * with the remote server and get a representation for the RDF data matching one of the
+ * the RDF parsers registered in the store. In this case, the media type parameter must be
+ * set to the <code>'remote'</code> value.<br/>
+ *<br/>
+ * An additional URI for the graph where the parsed data will be loaded and a callback function
+ * can be also passed as parameters. If no graph is specified, triples will be loaded in the
+ * default graph.<br/>
+ *<br/>
+ * By default loading data will not trigger notification through the events API. If events needs to
+ * be trigger, the functio <code>setBatchLoadEvents</code> must be invoked with a true parameter.
+ *
+ * @arguments
+ * @param {String} mediaType Media type (application/json, text/n3...) of the data to be parsed or the value <code>'remote'</code> if a URI for the data is passed instead
+ * @param {String} data RDF data to be parsed and loaded or an URI where the data will be retrieved after performing content negotiation
+ * @param {String} [graph] Graph where the parsed triples will be inserted. If it is not specified, triples will be loaded in the default graph
+ * @param {Function} callback that will be invoked with a success notification and the number of triples loaded.
+ */
 Store.Store.prototype.load = function(){
     var mediaType;
     var data;
@@ -39744,6 +43469,30 @@ Store.Store.prototype.load = function(){
     }
 };
 
+/**
+ * Registers a new parser associated to the provided media type. If there is a parser already registered for
+ * that media type, the new parser will replace the old one.<br/>
+ *<br/>
+ * Parsers must implement a function *parse* accepting the data to be parsed as the
+ * first parameter and the destination graph URI as the second one.
+ * They must return an array of objects with properties: 'subject', 'predicate', 'object'
+ * and 'graph' containing lexical representations for these values: 
+ *<br/>
+ *<ul>
+ * <li><code>{literal: '"literal"'}</code></li>
+ * <li><code>{literal: ''"literal"^^<datatype>'}</code></li>
+ * <li><code>{literal: '"literal"@lang'}</code></li>
+ * <li><code>{uri: 'uri'}</code></li>
+ * <li><code>{blank: '_:label'}</code></li>
+ *</ul>
+ *<br/>
+ * The provided media type will be used to perform content negotiation when dealing with remote
+ * resources, or to select the parser in the <code>load</code> function.
+ *
+ * @arguments
+ * @param {String} mediaType the media type for this parser
+ * @param {String} parser an object containing the *parse* function with the parser logic
+ */
 Store.Store.prototype.registerParser = function(mediaType, parser) {
     this.engine.rdfLoader.registerParser(mediaType,parser);
 };
@@ -39751,19 +43500,36 @@ Store.Store.prototype.registerParser = function(mediaType, parser) {
 /**
  * Returns the URI of all the graphs currently contained
  * in the store
+ *
+ * @arguments:
+ * @param {Function} callback function that will receive a success notification and the array of graph URIs
  */
 Store.Store.prototype.registeredGraphs = function(callback) {
-    var graphs = this.engine.lexicon.registeredGraphs(true);
-    var acum = [];
-    for(var i=0; i<graphs.length; i++) {
-        var graph = graphs[i];
-        var uri = new RDFJSInterface.NamedNode(graph);
-        acum.push(uri);
+    if(this.isMongodb) {
+        this.engine.registeredGraphs(true, function(graphs){
+            var acum = [];
+            for(var i=0; i<graphs.length; i++) {
+                var graph = graphs[i];
+                var uri = new RDFJSInterface.NamedNode(graph);
+                acum.push(uri);
+            }
+            
+            return callback(true, acum);    
+        });
+    } else {
+        var graphs = this.engine.lexicon.registeredGraphs(true);
+        var acum = [];
+        for(var i=0; i<graphs.length; i++) {
+            var graph = graphs[i];
+            var uri = new RDFJSInterface.NamedNode(graph);
+            acum.push(uri);
+        }
+     
+        return callback(true, acum);    
     }
-
-    return callback(true, acum);    
 };
 
+/** @private */
 Store.Store.prototype._nodeToQuery = function(term) {
     if(term.interfaceName === 'NamedNode') {
         var resolvedUri = this.rdf.resolve(term.valueOf());
@@ -39782,13 +43548,32 @@ Store.Store.prototype._nodeToQuery = function(term) {
 /**
  * Returns the current network transport being used by the
  * the store.
+ * 
+ * The default transport uses TCP sockets in the Node.js version
+ * and relies on jQuery in the browser version. This can be overriden
+ * using the <code>setNetworkTransport</code> function.
  */
 Store.Store.prototype.getNetworkTransport = function() {
     return NetworkTransport;
 };
 
 /**
- * Sets the network transport used by the store;
+ * Sets the network transport used by the store.<br/>
+ * <br/>
+ * Network transport consist of an object implementing the <code>load</code>
+ * function, receiving the URI to load, a string with the value
+ * of the HTTP 'Accept' header for the store registered parsers,
+ * a callback function where the retrieved data and the success notification
+ * must be returned.<br/>
+ *<br/>
+ * Different examples with implementations of different transports can be found
+ * in the source code of the store:
+ *<ul>
+ * <li>src/js-communication/src/tcp_transport.js</li>
+ * <li>src/js-communication/src/ajax_transport.js</li>
+ *</ul>
+ * @arguments
+ * @param networkTransportImpl object implementing the transport *load* function.
  */
 Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
     NetworkTransport = networkTransportImpl;
@@ -39796,182 +43581,219 @@ Store.Store.prototype.setNetworkTransport = function(networkTransportImpl) {
 
 // end of ./src/js-store/src/store.js 
 // imports
+RDFStoreChild = {};
 
-    RDFStoreWorker = {};
+RDFStoreChild.observingCallbacks = {};
 
-    RDFStoreWorker.observingCallbacks = {};
+RDFStoreChild.workerCallbacksCounter = 0;
+RDFStoreChild.workerCallbacks = {};
+RDFStoreChild.registerCallback = function(cb) {
+    var nextId = ""+RDFStoreChild.workerCallbacksCounter;
+    RDFStoreChild.workerCallbacksCounter++;
+    RDFStoreChild.workerCallbacks[nextId] = cb;
+    return nextId;
+};
 
-    RDFStoreWorker.handleCreate = function(argsObject, cb) {
-        args = [argsObject];
-        //console.log("in handling create");
-        args.push(function(result){
-            //console.log("created!!!");
-            // Stores the store object in the worker
-            RDFStoreWorker.store = result;
-            //console.log("posting MESSAGE!");
+RDFStoreChild.handleCreate = function(argsObject, cb) {
+    // redefine NetworkTransport
 
-            postMessage({'callback':cb, 'result':'created', 'success':true});
+    if(typeof(NetworkTransport) != 'undefined'  && NetworkTransport != null) {
+        NetworkTransport = {
+            load: function(uri, graph, callback) {
+                var cbId = RDFStoreChild.registerCallback(function(results){
+                    callback.apply(callback,results);
+                });
+                process.send({'fn':'workerRequest:NetworkTransport:load','callback':cbId, 'arguments':[uri,graph]});
+            },
+
+            loadFromFile: function(parser, graph, uri, callback) {
+
+            }
+        }
+    }
+
+    args = [argsObject];
+    //console.log("in handling create");
+    args.push(function(result){
+        //console.log("created!!!");
+        // Stores the store object in the worker
+        RDFStoreChild.store = result;
+        //console.log("posting MESSAGE!");
+
+        process.send({'callback':cb, 'result':'created', 'success':true});
+    });
+    //console.log("creating");
+    Store.create.apply(Store,args)
+};
+
+RDFStoreChild.receive = function(packet) {
+    var msg = packet.data || packet;
+    //console.log("RECEIVED...");
+    if(msg.fn === 'workerRequestResponse') {
+        var cbId = msg.callback;
+        var callback = RDFStoreChild.workerCallbacks[cbId];
+        if(callback != null) {
+            delete RDFStoreChild.workerCallbacks[cbId];
+            callback(msg.results);
+        }
+    } else if(msg.fn === 'create' && msg.args !=null) {
+        //console.log("handling create");
+        RDFStoreChild.handleCreate(msg.args, msg.callback);
+    } else if(msg.fn === 'setBatchLoadEvents') {
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store, msg.args);
+    } else if(msg.fn === 'registerDefaultNamespace') {
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store, msg.args);
+    } else if(msg.fn === 'registerDefaultProfileNamespaces') {
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store, msg.args);
+    } else if((msg.fn === 'execute' ||
+               msg.fn === 'executeWithEnvironment' ||
+               msg.fn === 'graph'||
+               msg.fn === 'node' ||
+               msg.fn === 'clear' ||
+               msg.fn === 'load') && msg.args != null) {
+        msg.args.push(function(success, result){
+            //console.log("CALLBACK!");
+            if(msg.callback!=null) {
+                process.send({'callback':msg.callback, 'result':result, 'success':success});
+            }
         });
-        //console.log("creating");
-        Store.create.apply(Store,args)
-    };
-
-    RDFStoreWorker.receive = function(packet) {
-        var msg = packet.data || packet;
-        //console.log("RECEIVED...");
-        if(msg.fn === 'create' && msg.args !=null) {
-            //console.log("handling create");
-            RDFStoreWorker.handleCreate(msg.args, msg.callback);
-        } else if(msg.fn === 'setBatchLoadEvents') {
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store, msg.args);
-        } else if(msg.fn === 'registerDefaultNamespace') {
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store, msg.args);
-        } else if(msg.fn === 'registerDefaultProfileNamespaces') {
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store, msg.args);
-        } else if((msg.fn === 'execute' ||
-                   msg.fn === 'executeWithEnvironment' ||
-                   msg.fn === 'graph'||
-                   msg.fn === 'node' ||
-                   msg.fn === 'clear' ||
-                   msg.fn === 'load') && msg.args != null) {
+        try {
+            RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,msg.args);
+        } catch(e) {
+            console.log("Error executing method through connection");
+            console.log(e);
+        }
+    } else if((msg.fn === 'insert'||
+               msg.fn === 'delete') && msg.args != null) {
+        try {
             msg.args.push(function(success, result){
                 //console.log("CALLBACK!");
                 if(msg.callback!=null) {
-                    postMessage({'callback':msg.callback, 'result':result, 'success':success});
+                    process.send({'callback':msg.callback, 'result':result, 'success':success});
                 }
             });
-            try {
-                RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,msg.args);
-            } catch(e) {
-                console.log("Error executing method through connection");
-                console.log(e);
+            var triple;
+            var toWrap = msg.args[0];
+            for(var i=0; i<toWrap.triples.length; i++) {
+                triple = toWrap.triples[i];
+                toWrap.triples[i] = new RDFJSInterface.Triple(RDFStoreChild.adaptJSInterface(triple.subject),
+                                                              RDFStoreChild.adaptJSInterface(triple.predicate),
+                                                              RDFStoreChild.adaptJSInterface(triple.object));
+            }                
+
+            if(msg.args[1].interfaceName != null) {
+                msg.args[1] = RDFStoreChild.adaptJSInterface(msg.args[1]);
             }
-        } else if((msg.fn === 'insert'||
-                   msg.fn === 'delete') && msg.args != null) {
-            try {
-                msg.args.push(function(success, result){
-                    //console.log("CALLBACK!");
-                    if(msg.callback!=null) {
-                        postMessage({'callback':msg.callback, 'result':result, 'success':success});
-                    }
-                });
-                var triple;
-                var toWrap = msg.args[0];
-                for(var i=0; i<toWrap.triples.length; i++) {
-                    triple = toWrap.triples[i];
-                    toWrap.triples[i] = new RDFJSInterface.Triple(RDFStoreWorker.adaptJSInterface(triple.subject),
-                                                                  RDFStoreWorker.adaptJSInterface(triple.predicate),
-                                                                  RDFStoreWorker.adaptJSInterface(triple.object));
-                }                
-
-                if(msg.args[1].interfaceName != null) {
-                    msg.args[1] = RDFStoreWorker.adaptJSInterface(msg.args[1]);
-                }
-                msg.args[0] = RDFStoreWorker.store.rdf.createGraph(toWrap.triples)
-                //console.log("ARGS...");
-                
-                RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,msg.args);
-            } catch(e) {
-                console.log("Error executing method through connection");
-                console.log(e);
-            }
-        } else if(msg.fn === 'rdf/setPrefix' && msg.args != null) {
-            RDFStoreWorker.store.rdf.setPrefix(msg.args[0], msg.args[1]);
-        } else if(msg.fn === 'rdf/setDefaultPrefix' && msg.args != null) {
-            RDFStoreWorker.store.rdf.setDefaultPrefix(msg.args[0]);
-        } else if(msg.fn === 'startObservingQuery' && msg.args != null) {
-            // regular callback
-            var cb = function(success, result){
-                postMessage({'callback':msg.callback[0], 'result':result, 'success':success});
-            };
-
-            RDFStoreWorker.observingCallbacks[msg.args[0]] = cb;
-            msg.args.push(cb);
-
-
-            // end register callback
-            msg.args.push(function(success, result) {
-                //console.log("CALLBACK END REGISTER OBSERVING QUERY!");
-                if(msg.callback && msg.callback[1] !=null) {
-                    postMessage({'callback':msg.callback[1], 'result':result, 'success':success});                    
-                }
-            });
-
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,msg.args);
-
-        } else if(msg.fn === 'stopObservingQuery') {
-            var cb = RDFStoreWorker.observingCallbacks[msg.args[0]];
-            if(cb) {
-                RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,[cb]);
-            }
-
-            delete RDFStoreWorker.observingCallbacks[msg.args[0]];
-        } else if(msg.fn === 'startObservingNode' && msg.args != null) {
-            // regular callback
-            var cb = function(result){
-                //console.log("CALLBACK OBSERVING NODE!");
-                postMessage({'callback':msg.callback, 'result':result});
-            };
-
-            RDFStoreWorker.observingCallbacks[msg.callback] = cb;
-            msg.args.push(cb);
-
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,msg.args);
-        } else if(msg.fn === 'stopObservingNode' && msg.args != null) {
-            var cb = RDFStoreWorker.observingCallbacks[msg.args[0]];
-            if(cb) {
-                //console.log("WORKER STOP OBSERVING");
-                //console.log(cb);
-                RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,[cb]);
-            }
-
-            delete RDFStoreWorker.observingCallbacks[msg.args[0]];
-        } else if(msg.fn === 'subscribe' && msg.args != null) {
-            // regular callback
-            var cb = function(event,result){
-                //console.log("CALLBACK OBSERVING NODE!");
-                postMessage({'callback':msg.callback, 'event':event, 'result':result});
-            };
-
-            RDFStoreWorker.observingCallbacks[msg.callback] = cb;
-            msg.args.push(cb);
-
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,msg.args);
-        } else if(msg.fn === 'stopObservingNode' && msg.args != null) {
-            var cb = RDFStoreWorker.observingCallbacks[msg.args[0]];
-            if(cb) {
-                //console.log("WORKER UNSUBSCRIBE");
-                //console.log(cb);
-                RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,[cb]);
-            }
-
-            delete RDFStoreWorker.observingCallbacks[msg.args[0]];
-        } else if(msg.fn === 'registeredGraphs' && msg.args != null) {
-            var cb = function(success, result){
-                //console.log("CALLBACK!");
-                if(msg.callback!=null) {
-                    postMessage({'callback':msg.callback, 'result':result, 'success':success});
-                }
-            };
-            RDFStoreWorker.store[msg.fn].apply(RDFStoreWorker.store,[cb]);
+            msg.args[0] = RDFStoreChild.store.rdf.createGraph(toWrap.triples)
+            //console.log("ARGS...");
+            
+            RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,msg.args);
+        } catch(e) {
+            console.log("Error executing method through connection");
+            console.log(e);
         }
-    };
+    } else if(msg.fn === 'rdf/setPrefix' && msg.args != null) {
+        RDFStoreChild.store.rdf.setPrefix(msg.args[0], msg.args[1]);
+    } else if(msg.fn === 'rdf/setDefaultPrefix' && msg.args != null) {
+        RDFStoreChild.store.rdf.setDefaultPrefix(msg.args[0]);
+    } else if(msg.fn === 'startObservingQuery' && msg.args != null) {
+        // regular callback
+        var cb = function(success, result){
+            process.send({'callback':msg.callback[0], 'result':result, 'success':success});
+        };
 
-    // helper functions
-    RDFStoreWorker.adaptJSInterface = function(node) {
-        if(node.interfaceName === 'BlankNode') {
-            return new RDFJSInterface.BlankNode(node.bnodeId);
-        } else if(node.interfaceName === 'Literal') {
-            return new RDFJSInterface.Literal(node.nominalValue, node.language, node.datatype);
-        } else if(node.interfaceName === 'NamedNode') {
-            return new RDFJSInterface.NamedNode(node.nominalValue);
+        RDFStoreChild.observingCallbacks[msg.args[0]] = cb;
+        msg.args.push(cb);
+
+
+        // end register callback
+        msg.args.push(function(success, result) {
+            //console.log("CALLBACK END REGISTER OBSERVING QUERY!");
+            if(msg.callback && msg.callback[1] !=null) {
+                process.send({'callback':msg.callback[1], 'result':result, 'success':success});                    
+            }
+        });
+
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,msg.args);
+
+    } else if(msg.fn === 'stopObservingQuery') {
+        var cb = RDFStoreChild.observingCallbacks[msg.args[0]];
+        if(cb) {
+            RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,[cb]);
         }
-    };
-    // set the receiver message
-    onmessage = RDFStoreWorker.receive;
+
+        delete RDFStoreChild.observingCallbacks[msg.args[0]];
+    } else if(msg.fn === 'startObservingNode' && msg.args != null) {
+        // regular callback
+        var cb = function(result){
+            //console.log("CALLBACK OBSERVING NODE!");
+            process.send({'callback':msg.callback, 'result':result});
+        };
+
+        RDFStoreChild.observingCallbacks[msg.callback] = cb;
+        msg.args.push(cb);
+
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,msg.args);
+    } else if(msg.fn === 'stopObservingNode' && msg.args != null) {
+        var cb = RDFStoreChild.observingCallbacks[msg.args[0]];
+        if(cb) {
+            //console.log("WORKER STOP OBSERVING");
+            //console.log(cb);
+            RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,[cb]);
+        }
+
+        delete RDFStoreChild.observingCallbacks[msg.args[0]];
+    } else if(msg.fn === 'subscribe' && msg.args != null) {
+        // regular callback
+        var cb = function(event,result){
+            //console.log("CALLBACK OBSERVING NODE!");
+            process.send({'callback':msg.callback, 'event':event, 'result':result});
+        };
+
+        RDFStoreChild.observingCallbacks[msg.callback] = cb;
+        msg.args.push(cb);
+
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,msg.args);
+    } else if(msg.fn === 'stopObservingNode' && msg.args != null) {
+        var cb = RDFStoreChild.observingCallbacks[msg.args[0]];
+        if(cb) {
+            //console.log("WORKER UNSUBSCRIBE");
+            //console.log(cb);
+            RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,[cb]);
+        }
+
+        delete RDFStoreChild.observingCallbacks[msg.args[0]];
+    } else if(msg.fn === 'registeredGraphs' && msg.args != null) {
+        var cb = function(success, result){
+            //console.log("CALLBACK!");
+            if(msg.callback!=null) {
+                process.send({'callback':msg.callback, 'result':result, 'success':success});
+            }
+        };
+        RDFStoreChild.store[msg.fn].apply(RDFStoreChild.store,[cb]);
+    }
+};
+
+// helper functions
+RDFStoreChild.adaptJSInterface = function(node) {
+    if(node.interfaceName === 'BlankNode') {
+        return new RDFJSInterface.BlankNode(node.bnodeId);
+    } else if(node.interfaceName === 'Literal') {
+        return new RDFJSInterface.Literal(node.nominalValue, node.language, node.datatype);
+    } else if(node.interfaceName === 'NamedNode') {
+        return new RDFJSInterface.NamedNode(node.nominalValue);
+    }
+};
+
+if(process.argv[2] === 'is_child') {
+  // set the receiver message
+  process.on('message',function(msg) {
+      RDFStoreChild.receive(msg);
+  });
+}
 
 
-// end of ./src/js-connection/src/rdfstore_worker.js 
+// end of ./src/js-connection/src/rdfstore_child.js 
 // exports
 var NetworkTransport = {};
 
